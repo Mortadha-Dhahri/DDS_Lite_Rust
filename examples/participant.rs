@@ -2,13 +2,19 @@ use std::env;
 use std::io;
 use std::net::SocketAddr;
 
-use dds_lite_rust::{NetworkDiscovery, Participant};
+use dds_lite_rust::{
+    EndpointKind,
+    NetworkDiscovery,
+    Participant,
+};
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 3 {
-        eprintln!("Usage: cargo run --example participant -- <id> <port>");
+    if args.len() != 4 {
+        eprintln!(
+            "Usage: cargo run --example participant -- <id> <port> <publisher|subscriber>"
+        );
         std::process::exit(1);
     }
 
@@ -25,6 +31,15 @@ fn main() -> io::Result<()> {
             "port must be a number",
         )
     })?;
+
+    let kind = match args[3].as_str() {
+        "publisher" => EndpointKind::Publisher,
+        "subscriber" => EndpointKind::Subscriber,
+        _ => {
+            eprintln!("Role must be either 'publisher' or 'subscriber'");
+            std::process::exit(1);
+        }
+    };
 
     let participant_address: SocketAddr =
         format!("127.0.0.1:{port}").parse().unwrap();
@@ -48,9 +63,20 @@ fn main() -> io::Result<()> {
 
     discovery.register_participant(&participant)?;
 
+    println!("Participant registered.");
+
+    let topic = "vehicle/state";
+
+    discovery.register_endpoint(
+        participant.id(),
+        topic,
+        kind,
+    )?;
+
     println!(
-        "Participant {} registered with discovery server.",
-        participant.id()
+        "Registered {:?} endpoint for topic '{}'.",
+        kind,
+        topic
     );
 
     println!("Participant running...");

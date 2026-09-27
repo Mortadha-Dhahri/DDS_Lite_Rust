@@ -1,5 +1,6 @@
 use serde::{Deserialize,Serialize};
 use crate::core::Participant;
+use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EndpointKind {
@@ -67,3 +68,14 @@ impl Discovery for LocalDiscovery {
      */
 }
 
+impl LocalDiscovery {
+    pub fn participant_address(
+        &self,
+        participant_id: u64,
+    ) -> Option<SocketAddr> {
+        self.participants
+            .iter()
+            .find(|participant| participant.id() == participant_id)
+            .map(|participant| participant.address())
+    }
+}

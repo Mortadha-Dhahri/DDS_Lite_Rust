@@ -134,46 +134,50 @@
 // }
 
 
-mod core;
-mod discovery;
-mod serialization;
-mod transport;
+// mod core;
+// mod discovery;
+// mod serialization;
+// mod transport;
 
-use std::net::SocketAddr;
+// use std::net::SocketAddr;
 
-use discovery::{
-    Discovery,
-    Endpoint,
-    EndpointKind,
-    LocalDiscovery,
-};
+// use discovery::{
+//     Discovery,
+//     Endpoint,
+//     EndpointKind,
+//     LocalDiscovery,
+// };
+
+// fn main() {
+//     let mut discovery = LocalDiscovery::new();
+
+//     let publisher = Endpoint {
+//         participant_id: 1,
+//         topic: "vehicle/state".to_string(),
+//         address: "127.0.0.1:7001".parse::<SocketAddr>().unwrap(),
+//         kind: EndpointKind::Publisher,
+//     };
+
+//     let subscriber = Endpoint {
+//         participant_id: 2,
+//         topic: "vehicle/state".to_string(),
+//         address: "127.0.0.1:7002".parse::<SocketAddr>().unwrap(),
+//         kind: EndpointKind::Subscriber,
+//     };
+
+//     discovery.register(publisher);
+//     discovery.register(subscriber);
+
+//     let publishers =
+//         discovery.lookup("vehicle/state", EndpointKind::Publisher);
+
+//     let subscribers =
+//         discovery.lookup("vehicle/state", EndpointKind::Subscriber);
+
+//     println!("Publishers: {publishers:#?}");
+//     println!("Subscribers: {subscribers:#?}");
+// }
 
 fn main() {
-    let mut discovery = LocalDiscovery::new();
-
-    let publisher = Endpoint {
-        participant_id: 1,
-        topic: "vehicle/state".to_string(),
-        address: "127.0.0.1:7001".parse::<SocketAddr>().unwrap(),
-        kind: EndpointKind::Publisher,
-    };
-
-    let subscriber = Endpoint {
-        participant_id: 2,
-        topic: "vehicle/state".to_string(),
-        address: "127.0.0.1:7002".parse::<SocketAddr>().unwrap(),
-        kind: EndpointKind::Subscriber,
-    };
-
-    discovery.register(publisher);
-    discovery.register(subscriber);
-
-    let publishers =
-        discovery.lookup("vehicle/state", EndpointKind::Publisher);
-
-    let subscribers =
-        discovery.lookup("vehicle/state", EndpointKind::Subscriber);
-
-    println!("Publishers: {publishers:#?}");
-    println!("Subscribers: {subscribers:#?}");
+    println!("Hello world");
 }

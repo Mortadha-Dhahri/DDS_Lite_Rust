@@ -79,6 +79,26 @@ fn main() -> io::Result<()> {
         topic
     );
 
+    if kind == EndpointKind::Publisher {
+        println!();
+        println!("Looking up subscribers...");
+
+        let subscribers = discovery.lookup(
+            topic,
+            EndpointKind::Subscriber,
+        )?;
+
+        println!("Discovered subscribers:");
+
+        for subscriber in subscribers {
+            println!(
+                "Participant {} at {}",
+                subscriber.participant_id,
+                subscriber.address
+            );
+        }
+    }
+
     println!("Participant running...");
 
     loop {

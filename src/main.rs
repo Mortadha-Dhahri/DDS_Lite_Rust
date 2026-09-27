@@ -1,3 +1,9 @@
+mod core;
+
+use core::Topic;
+
 fn main() {
-    println!("Hello, world!");
+    let topic = Topic::new("vehicle/state", "VehicleState");
+
+    println!("{topic:?}");
 }

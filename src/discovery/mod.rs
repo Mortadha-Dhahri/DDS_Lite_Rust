@@ -1,8 +1,8 @@
 pub mod discovery;
 
 pub use discovery::{
-    DiscoveryServer,
+    Discovery,
     Endpoint,
     EndpointKind,
+    LocalDiscovery,
 };
-

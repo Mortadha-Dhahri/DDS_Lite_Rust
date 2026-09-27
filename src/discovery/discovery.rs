@@ -18,21 +18,41 @@ pub struct DiscoveryServer {
     endpoints: Vec<Endpoint>,
 }
 
-impl DiscoveryServer {
+pub trait Discovery {
+    fn register(&mut self, endpoint: Endpoint);
+
+    fn lookup(&self, topic: &str, kind: EndpointKind) -> Vec<Endpoint>;
+}
+
+pub struct LocalDiscovery {
+    endpoints: Vec<Endpoint>,
+}
+
+impl LocalDiscovery {
     pub fn new() -> Self {
         Self {
             endpoints: Vec::new(),
         }
     }
+}
 
-    pub fn register(&mut self, endpoint: Endpoint) {
+impl Discovery for LocalDiscovery {
+    fn register(&mut self, endpoint: Endpoint) {
         self.endpoints.push(endpoint);
     }
 
-    pub fn lookup(&self, topic: &str) -> Vec<&Endpoint> {
+    fn lookup(&self, topic: &str, kind: EndpointKind) -> Vec<Endpoint> {
         self.endpoints
             .iter()
-            .filter(|endpoint| endpoint.topic == topic)
+            .filter(|endpoint| {
+                endpoint.topic == topic && endpoint.kind == kind
+            })
+            .cloned()
             .collect()
     }
+
+    /*
+        lookup("vehicle/state", EndpointKind::Subscriber) means Find subscribers interested in this topic.
+        lookup("vehicle/state", EndpointKind::Publisher) means Find publishers for this topic.
+     */
 }

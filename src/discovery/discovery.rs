@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use crate::core::Participant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndpointKind {
@@ -10,36 +11,45 @@ pub enum EndpointKind {
 pub struct Endpoint {
     pub participant_id: u64,
     pub topic: String,
-    pub address: SocketAddr,
     pub kind: EndpointKind,
 }
 
 pub struct DiscoveryServer {
+    participants: Vec<Participant>
     endpoints: Vec<Endpoint>,
 }
 
 pub trait Discovery {
-    fn register(&mut self, endpoint: Endpoint);
+    fn register_participant(&mut self, participant: Participant);
+
+    fn register_endpoint(&mut self, endpoint: Endpoint);
 
     fn lookup(&self, topic: &str, kind: EndpointKind) -> Vec<Endpoint>;
 }
 
 pub struct LocalDiscovery {
+    participants:Vec<Participant>,
     endpoints: Vec<Endpoint>,
 }
 
 impl LocalDiscovery {
     pub fn new() -> Self {
         Self {
+            participants: Vec::new(),
             endpoints: Vec::new(),
         }
     }
 }
 
 impl Discovery for LocalDiscovery {
-    fn register(&mut self, endpoint: Endpoint) {
+
+    fn register_endpoint(&mut self, endpoint: Endpoint) {
         self.endpoints.push(endpoint);
     }
+
+    fn register_participant(&mut self, participant: Participant) {
+        self.participants.push(participant);
+    }    
 
     fn lookup(&self, topic: &str, kind: EndpointKind) -> Vec<Endpoint> {
         self.endpoints

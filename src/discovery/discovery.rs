@@ -1,7 +1,7 @@
-use std::net::SocketAddr;
+use serde::{Deserialize,Serialize};
 use crate::core::Participant;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EndpointKind {
     Publisher,
     Subscriber,
@@ -15,7 +15,7 @@ pub struct Endpoint {
 }
 
 pub struct DiscoveryServer {
-    participants: Vec<Participant>
+    participants: Vec<Participant>,
     endpoints: Vec<Endpoint>,
 }
 
@@ -66,3 +66,4 @@ impl Discovery for LocalDiscovery {
         lookup("vehicle/state", EndpointKind::Publisher) means Find publishers for this topic.
      */
 }
+

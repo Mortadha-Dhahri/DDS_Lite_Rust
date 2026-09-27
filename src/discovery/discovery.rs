@@ -15,10 +15,6 @@ pub struct Endpoint {
     pub kind: EndpointKind,
 }
 
-pub struct DiscoveryServer {
-    participants: Vec<Participant>,
-    endpoints: Vec<Endpoint>,
-}
 
 pub trait Discovery {
     fn register_participant(&mut self, participant: Participant);

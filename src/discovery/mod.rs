@@ -1,6 +1,7 @@
 pub mod discovery;
 pub mod protocol;
 pub mod server;
+pub mod network;
 
 pub use discovery::{
     Discovery,
@@ -16,3 +17,5 @@ pub use protocol::{
 };
 
 pub use server::DiscoveryServer;
+
+pub use network::NetworkDiscovery;

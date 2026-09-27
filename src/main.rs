@@ -59,34 +59,73 @@
 //     println!("Data: {:?}", received_state);
 // }
 
+
+
+// mod core;
+// mod serialization;
+// mod transport;
+
+// use std::net::SocketAddr;
+// use std::thread;
+
+// use transport::{Transport, UdpTransport};
+
+// fn main() {
+//     let receiver_address: SocketAddr = "127.0.0.1:7001".parse().unwrap();
+
+//     let receiver = UdpTransport::bind(receiver_address)
+//         .expect("failed to bind receiver");
+
+//     let sender = UdpTransport::bind("127.0.0.1:0".parse().unwrap())
+//         .expect("failed to bind sender");
+
+//     let message = b"hello from DDS-Lite";
+
+//     sender
+//         .send(message, receiver.local_addr().unwrap())
+//         .expect("failed to send message");
+
+//     let (received, sender_address) = receiver
+//         .receive()
+//         .expect("failed to receive message");
+
+//     println!("Received from: {sender_address}");
+//     println!("Message: {}", String::from_utf8_lossy(&received));
+// }
+
 mod core;
+mod discovery;
 mod serialization;
 mod transport;
 
 use std::net::SocketAddr;
-use std::thread;
 
-use transport::{Transport, UdpTransport};
+use discovery::{
+    DiscoveryServer,
+    Endpoint,
+    EndpointKind,
+};
 
 fn main() {
-    let receiver_address: SocketAddr = "127.0.0.1:7001".parse().unwrap();
+    let mut discovery = DiscoveryServer::new();
 
-    let receiver = UdpTransport::bind(receiver_address)
-        .expect("failed to bind receiver");
+    let publisher = Endpoint {
+        participant_id: 1,
+        topic: "vehicle/state".to_string(),
+        address: "127.0.0.1:7001".parse::<SocketAddr>().unwrap(),
+        kind: EndpointKind::Publisher,
+    };
 
-    let sender = UdpTransport::bind("127.0.0.1:0".parse().unwrap())
-        .expect("failed to bind sender");
+    discovery.register(publisher);
 
-    let message = b"hello from DDS-Lite";
+    let publishers = discovery.lookup("vehicle/state");
 
-    sender
-        .send(message, receiver.local_addr().unwrap())
-        .expect("failed to send message");
-
-    let (received, sender_address) = receiver
-        .receive()
-        .expect("failed to receive message");
-
-    println!("Received from: {sender_address}");
-    println!("Message: {}", String::from_utf8_lossy(&received));
+    for endpoint in publishers {
+        println!(
+            "Found {:?} for {} at {}",
+            endpoint.kind,
+            endpoint.topic,
+            endpoint.address
+        );
+    }
 }

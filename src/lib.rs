@@ -10,3 +10,6 @@ pub use discovery::{
     NetworkDiscovery,
     DiscoveryServer
 };
+
+pub use transport::{UdpTransport,Transport};
+pub use serialization::WireMessage;

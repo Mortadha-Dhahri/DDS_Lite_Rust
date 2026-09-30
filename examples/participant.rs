@@ -6,6 +6,8 @@ use dds_lite_rust::{
     EndpointKind,
     NetworkDiscovery,
     Participant,
+    UdpTransport,
+    Transport
 };
 
 fn main() -> io::Result<()> {
@@ -50,6 +52,8 @@ fn main() -> io::Result<()> {
     let participant =
         Participant::new(participant_id, participant_address);
 
+    let transport = UdpTransport::bind(participant_address)?;
+
     let discovery = NetworkDiscovery::bind(
         "127.0.0.1:0".parse().unwrap(),
         server_address,
@@ -59,6 +63,11 @@ fn main() -> io::Result<()> {
         "Participant {} starting on {}",
         participant.id(),
         participant.address()
+    );
+
+    println!(
+        "Data transport listening on {}",
+        transport.local_addr()?
     );
 
     discovery.register_participant(&participant)?;
@@ -90,18 +99,45 @@ fn main() -> io::Result<()> {
 
         println!("Discovered subscribers:");
 
-        for subscriber in subscribers {
+        for subscriber in &subscribers {
             println!(
                 "Participant {} at {}",
                 subscriber.participant_id,
                 subscriber.address
             );
         }
+
+        if let Some(subscriber) = subscribers.first() {
+            let payload = b"hello from publisher";
+
+            transport.send(payload, subscriber.address)?;
+
+            println!();
+            println!(
+                "Sent {} bytes to {}",
+                payload.len(),
+                subscriber.address
+            );
+        } else {
+            println!("No subscribers discovered.");
+        }
     }
 
-    println!("Participant running...");
+    if kind == EndpointKind::Subscriber {
+        println!();
+        println!("Waiting for data...");
 
-    loop {
-        std::thread::park();
+        loop {
+            let (data, sender) = transport.receive()?;
+
+            println!(
+                "Received {} bytes from {}: {:?}",
+                data.len(),
+                sender,
+                String::from_utf8_lossy(&data)
+            );
+        }
     }
+
+    Ok(())
 }

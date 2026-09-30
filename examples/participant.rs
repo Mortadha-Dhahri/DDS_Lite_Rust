@@ -3,16 +3,13 @@ use std::io;
 use std::net::SocketAddr;
 
 use dds_lite_rust::{
-    decode_message,
-    deserialize_payload,
-    encode_message,
-    serialize_payload,
     EndpointKind,
     NetworkDiscovery,
     Participant,
-    Transport,
     UdpTransport,
-    WireMessage,
+    Publisher,
+    Subscriber,
+    Topic
 };
 
 use serde::{Deserialize, Serialize};
@@ -65,12 +62,12 @@ fn main() -> io::Result<()> {
     let participant =
         Participant::new(participant_id, participant_address);
 
-    let transport = UdpTransport::bind(participant_address)?;
-
     let discovery = NetworkDiscovery::bind(
         "127.0.0.1:0".parse().unwrap(),
         server_address,
     )?;
+
+    let transport = UdpTransport::bind(participant_address)?;
 
     println!(
         "Participant {} starting on {}",
@@ -100,102 +97,53 @@ fn main() -> io::Result<()> {
         kind,
         topic
     );
-
-    if kind == EndpointKind::Publisher {
-        println!();
-        println!("Looking up subscribers...");
-
-        let subscribers = discovery.lookup(
-            topic,
-            EndpointKind::Subscriber,
-        )?;
-
-        println!("Discovered subscribers:");
-
-        for subscriber in &subscribers {
-            println!(
-                "Participant {} at {}",
-                subscriber.participant_id,
-                subscriber.address
-            );
-        }
-
-        if let Some(subscriber) = subscribers.first() {
+    
+    match kind {
+        EndpointKind::Publisher => {
+            let publisher = Publisher::<VehicleState>::new(
+                Topic::new(
+                    "vehicle/state",
+                    "VehicleState",
+                ),
+                discovery,
+                transport,
+            )?;
 
             let vehicle_state = VehicleState {
                 speed: 42.5,
                 steering_angle: 1.2,
             };
 
-            let payload = serialize_payload(&vehicle_state)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error,
-                    )
-                })?;
+            publisher.publish(&vehicle_state)?;
 
-            let message = WireMessage {
-                topic: topic.to_string(),
-                type_name: "VehicleState".to_string(),
-                payload,
-            };
+            println!("VehicleState published.");
 
-            let bytes = encode_message(&message)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error,
-                    )
-                })?;
+            loop {
+                std::thread::park();
+            }
+        }
 
-            transport.send(&bytes, subscriber.address)?;
+        EndpointKind::Subscriber => {
+            let subscriber = Subscriber::<VehicleState>::new(
+                Topic::new(
+                    "vehicle/state",
+                    "VehicleState",
+                ),
+                discovery,
+                transport,
+            )?;
 
-            println!();
-            println!(
-                "Sent VehicleState to {}",
-                subscriber.address
-            );
+            println!("Subscriber waiting for messages...");
 
-            println!();
+            loop {
+                let vehicle_state = subscriber.receive()?;
 
-        } else {
-            println!("No subscribers discovered.");
+                println!(
+                    "Received VehicleState: {:?}",
+                    vehicle_state
+                );
+            }
         }
     }
 
-    if kind == EndpointKind::Subscriber {
-        println!();
-        println!("Waiting for data...");
-
-        loop {
-
-            let (data, sender) = transport.receive()?;
-
-            let message = decode_message(&data)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error,
-                    )
-                })?;
-
-            println!();
-            println!("Received message from {}", sender);
-            println!("Topic: {}", message.topic);
-            println!("Type: {}", message.type_name);
-
-            let vehicle_state: VehicleState =
-                deserialize_payload(&message.payload)
-                    .map_err(|error| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            error,
-                        )
-                    })?;
-
-            println!("Data: {vehicle_state:?}");
-    }
-}
-    Ok(())
 }

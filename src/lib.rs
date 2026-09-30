@@ -12,4 +12,4 @@ pub use discovery::{
 };
 
 pub use transport::{UdpTransport,Transport};
-pub use serialization::WireMessage;
+pub use serialization::*;

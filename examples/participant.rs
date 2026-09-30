@@ -3,12 +3,25 @@ use std::io;
 use std::net::SocketAddr;
 
 use dds_lite_rust::{
+    decode_message,
+    deserialize_payload,
+    encode_message,
+    serialize_payload,
     EndpointKind,
     NetworkDiscovery,
     Participant,
+    Transport,
     UdpTransport,
-    Transport
+    WireMessage,
 };
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VehicleState {
+    speed: f32,
+    steering_angle: f32,
+}
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -108,16 +121,44 @@ fn main() -> io::Result<()> {
         }
 
         if let Some(subscriber) = subscribers.first() {
-            let payload = b"hello from publisher";
 
-            transport.send(payload, subscriber.address)?;
+            let vehicle_state = VehicleState {
+                speed: 42.5,
+                steering_angle: 1.2,
+            };
+
+            let payload = serialize_payload(&vehicle_state)
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        error,
+                    )
+                })?;
+
+            let message = WireMessage {
+                topic: topic.to_string(),
+                type_name: "VehicleState".to_string(),
+                payload,
+            };
+
+            let bytes = encode_message(&message)
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        error,
+                    )
+                })?;
+
+            transport.send(&bytes, subscriber.address)?;
 
             println!();
             println!(
-                "Sent {} bytes to {}",
-                payload.len(),
+                "Sent VehicleState to {}",
                 subscriber.address
             );
+
+            println!();
+
         } else {
             println!("No subscribers discovered.");
         }
@@ -128,16 +169,33 @@ fn main() -> io::Result<()> {
         println!("Waiting for data...");
 
         loop {
+
             let (data, sender) = transport.receive()?;
 
-            println!(
-                "Received {} bytes from {}: {:?}",
-                data.len(),
-                sender,
-                String::from_utf8_lossy(&data)
-            );
-        }
-    }
+            let message = decode_message(&data)
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        error,
+                    )
+                })?;
 
+            println!();
+            println!("Received message from {}", sender);
+            println!("Topic: {}", message.topic);
+            println!("Type: {}", message.type_name);
+
+            let vehicle_state: VehicleState =
+                deserialize_payload(&message.payload)
+                    .map_err(|error| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            error,
+                        )
+                    })?;
+
+            println!("Data: {vehicle_state:?}");
+    }
+}
     Ok(())
 }

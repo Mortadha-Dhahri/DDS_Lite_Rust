@@ -4,12 +4,10 @@ use std::net::SocketAddr;
 
 use dds_lite_rust::{
     EndpointKind,
-    NetworkDiscovery,
-    Participant,
-    UdpTransport,
+    ParticipantRuntime,
     Publisher,
     Subscriber,
-    Topic
+    Topic,
 };
 
 use serde::{Deserialize, Serialize};
@@ -25,7 +23,8 @@ fn main() -> io::Result<()> {
 
     if args.len() != 4 {
         eprintln!(
-            "Usage: cargo run --example participant -- <id> <port> <publisher|subscriber>"
+            "Usage: cargo run --example participant -- \
+             <id> <port> <publisher|subscriber>"
         );
         std::process::exit(1);
     }
@@ -53,60 +52,31 @@ fn main() -> io::Result<()> {
         }
     };
 
-    let participant_address: SocketAddr =
-        format!("127.0.0.1:{port}").parse().unwrap();
+    let topic = Topic::new("vehicle/state", "VehicleState");
 
-    let server_address: SocketAddr =
+    let discovery_server: SocketAddr =
         "127.0.0.1:6000".parse().unwrap();
 
-    let participant =
-        Participant::new(participant_id, participant_address);
-
-    let discovery = NetworkDiscovery::bind(
-        "127.0.0.1:0".parse().unwrap(),
-        server_address,
+    let runtime = ParticipantRuntime::new(
+        participant_id,
+        port,
+        kind,
+        topic.name(),
+        discovery_server,
     )?;
-
-    let transport = UdpTransport::bind(participant_address)?;
 
     println!(
         "Participant {} starting on {}",
-        participant.id(),
-        participant.address()
+        runtime.participant.id(),
+        runtime.participant.address()
     );
 
-    println!(
-        "Data transport listening on {}",
-        transport.local_addr()?
-    );
-
-    discovery.register_participant(&participant)?;
-
-    println!("Participant registered.");
-
-    let topic = "vehicle/state";
-
-    discovery.register_endpoint(
-        participant.id(),
-        topic,
-        kind,
-    )?;
-
-    println!(
-        "Registered {:?} endpoint for topic '{}'.",
-        kind,
-        topic
-    );
-    
     match kind {
         EndpointKind::Publisher => {
             let publisher = Publisher::<VehicleState>::new(
-                Topic::new(
-                    "vehicle/state",
-                    "VehicleState",
-                ),
-                discovery,
-                transport,
+                topic,
+                runtime.discovery,
+                runtime.transport,
             )?;
 
             let vehicle_state = VehicleState {
@@ -125,12 +95,9 @@ fn main() -> io::Result<()> {
 
         EndpointKind::Subscriber => {
             let subscriber = Subscriber::<VehicleState>::new(
-                Topic::new(
-                    "vehicle/state",
-                    "VehicleState",
-                ),
-                discovery,
-                transport,
+                topic,
+                runtime.discovery,
+                runtime.transport,
             )?;
 
             println!("Subscriber waiting for messages...");
@@ -145,5 +112,4 @@ fn main() -> io::Result<()> {
             }
         }
     }
-
 }

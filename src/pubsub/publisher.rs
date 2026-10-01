@@ -2,41 +2,46 @@ use std::io;
 use std::net::SocketAddr;
 
 use crate::{
-    encode_message,
-    serialize_payload,
-    EndpointKind,
-    NetworkDiscovery,
-    Topic,
-    Transport,
-    UdpTransport,
-    WireMessage,
+    EndpointKind, History, NetworkDiscovery, Topic, Transport, UdpTransport, WireMessage, encode_message , serialize_payload,qos::QosPolicy
 };
 
 pub struct Publisher<T> {
     topic: Topic,
     discovery: NetworkDiscovery,
     transport: UdpTransport,
+    history: History<T>,
+    next_sequence_number: u64,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T> Publisher<T>
 where
-    T: serde::Serialize,
+    T: serde::Serialize + Clone,
 {
     pub fn new(
-        topic: Topic,
+        topic: Topic ,
         discovery: NetworkDiscovery,
         transport: UdpTransport,
+        qos: QosPolicy,
     ) -> io::Result<Self> {
         Ok(Self {
             topic,
             discovery,
             transport,
+            history: History::new(qos.history_depth()),
+            next_sequence_number : 0, 
             _marker: std::marker::PhantomData,
         })
     }
 
-    pub fn publish(&self, data: &T) -> io::Result<()> {
+    pub fn publish(&mut self, data: &T) -> io::Result<()> {
+
+        self.history.push(data.clone());
+
+        let sequence_number = self.next_sequence_number;
+
+        self.next_sequence_number += 1;
+
         let subscribers = self.discovery.lookup(
             self.topic.name(),
             EndpointKind::Subscriber,
@@ -51,6 +56,7 @@ where
             })?;
 
         let message = WireMessage {
+            sequence_number,
             topic: self.topic.name().to_string(),
             type_name: self.topic.type_name().to_string(),
             payload,
@@ -65,8 +71,8 @@ where
             })?;
 
         println!(
-            "Publishing '{}' to {} subscriber(s).",
-            self.topic.name(),
+            "Publishing sequence {} to {} subscriber(s).",
+            sequence_number,
             subscribers.len()
         );
 

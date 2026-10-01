@@ -8,11 +8,13 @@ use dds_lite_rust::{
     Publisher,
     Subscriber,
     Topic,
+    QosPolicy,
+    Reliability
 };
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct VehicleState {
     speed: f32,
     steering_angle: f32,
@@ -73,10 +75,17 @@ fn main() -> io::Result<()> {
 
     match kind {
         EndpointKind::Publisher => {
-            let publisher = Publisher::<VehicleState>::new(
+
+            let qos = QosPolicy::new(
+    10,
+    Reliability::BestEffort,
+            );
+
+            let mut publisher = Publisher::<VehicleState>::new(
                 topic,
                 runtime.discovery,
                 runtime.transport,
+                qos,
             )?;
 
             let vehicle_state = VehicleState {

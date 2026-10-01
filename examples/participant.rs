@@ -103,7 +103,7 @@ fn main() -> io::Result<()> {
         }
 
         EndpointKind::Subscriber => {
-            let subscriber = Subscriber::<VehicleState>::new(
+            let mut subscriber = Subscriber::<VehicleState>::new(
                 topic,
                 runtime.discovery,
                 runtime.transport,

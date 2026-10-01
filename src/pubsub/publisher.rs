@@ -29,7 +29,7 @@ where
             discovery,
             transport,
             history: History::new(qos.history_depth()),
-            next_sequence_number : 0, 
+            next_sequence_number : 1, 
             _marker: std::marker::PhantomData,
         })
     }

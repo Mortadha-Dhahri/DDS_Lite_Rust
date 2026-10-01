@@ -15,6 +15,7 @@ pub struct Subscriber<T> {
     topic: Topic,
     _discovery: NetworkDiscovery,
     transport: UdpTransport,
+    last_sequence_number: u64,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -31,11 +32,12 @@ where
             topic,
             _discovery: discovery,
             transport,
+            last_sequence_number:0,
             _marker: std::marker::PhantomData,
         })
     }
 
-    pub fn receive(&self) -> io::Result<T> {
+    pub fn receive(&mut self) -> io::Result<T> {
         loop {
             let (bytes, sender) = self.transport.receive()?;
 
@@ -56,6 +58,18 @@ where
 
                 continue;
             }
+            
+
+            if message.sequence_number <= self.last_sequence_number {
+                println!(
+                    "Ignoring duplicate or out-of-order message: sequence {}",
+                    message.sequence_number
+                );
+
+                continue;
+            }
+
+            self.last_sequence_number = message.sequence_number;
 
             let data = deserialize_payload::<T>(
                 &message.payload,

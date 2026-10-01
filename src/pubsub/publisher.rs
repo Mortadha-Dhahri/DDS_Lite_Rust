@@ -64,6 +64,12 @@ where
                 )
             })?;
 
+        println!(
+            "Publishing '{}' to {} subscriber(s).",
+            self.topic.name(),
+            subscribers.len()
+        );
+
         for subscriber in subscribers {
             self.transport
                 .send(&bytes, subscriber.address)?;

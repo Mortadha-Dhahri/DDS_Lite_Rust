@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq,Clone)]
 pub enum ControlMessage {
     Nack {
         topic: String,
@@ -8,16 +8,26 @@ pub enum ControlMessage {
     },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ControlEnvelope {
+    pub message: ControlMessage,
+}
+
 pub fn encode_control_message(
     message: &ControlMessage,
 ) -> Result<Vec<u8>, bincode::Error> {
-    bincode::serialize(message)
+    bincode::serialize(&ControlEnvelope {
+        message: message.clone(),
+    })
 }
 
 pub fn decode_control_message(
     bytes: &[u8],
 ) -> Result<ControlMessage, bincode::Error> {
-    bincode::deserialize(bytes)
+    let envelope: ControlEnvelope =
+        bincode::deserialize(bytes)?;
+
+    Ok(envelope.message)
 }
 
 #[cfg(test)]

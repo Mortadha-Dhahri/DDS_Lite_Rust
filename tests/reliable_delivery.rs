@@ -1,5 +1,6 @@
 use std::thread;
 use std::time::Duration;
+use std::net::UdpSocket;
 
 use serde::{Deserialize, Serialize};
 
@@ -212,4 +213,57 @@ fn reliable_delivery_recovers_from_lost_ack() {
     publisher.receive_control().unwrap();
 
     assert_eq!(publisher.pending_ack_count(), 0);
+}
+#[test]
+fn reliable_tracks_acknowledgements() {
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let receiver_address = receiver.local_addr().unwrap();
+
+    let publisher_address = "127.0.0.1:7202".parse().unwrap();
+
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+
+    let publisher_participant = Participant::new(1, publisher_address);
+
+    let subscriber_participant = Participant::new(2, receiver_address);
+
+    discovery
+        .register_participant(&publisher_participant)
+        .unwrap();
+
+    discovery
+        .register_participant(&subscriber_participant)
+        .unwrap();
+
+    let topic = Topic::new("test/qos", "TestMessage");
+
+    discovery
+        .register_endpoint(
+            publisher_participant.id(),
+            topic.name(),
+            EndpointKind::Publisher,
+        )
+        .unwrap();
+
+    discovery
+        .register_endpoint(
+            subscriber_participant.id(),
+            topic.name(),
+            EndpointKind::Subscriber,
+        )
+        .unwrap();
+
+    let transport = UdpTransport::bind(publisher_address).unwrap();
+
+    let qos = QosPolicy::new(10, Reliability::Reliable);
+
+    let mut publisher = Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+
+    publisher.publish(&TestMessage { value: 42 }).unwrap();
+
+    assert_eq!(publisher.pending_ack_count(), 1);
 }

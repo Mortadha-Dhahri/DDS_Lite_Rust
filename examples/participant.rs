@@ -88,14 +88,20 @@ fn main() -> io::Result<()> {
                 qos,
             )?;
 
-            let vehicle_state = VehicleState {
-                speed: 42.5,
-                steering_angle: 1.2,
-            };
+            for i in 0..5 {
+                let vehicle_state = VehicleState {
+                    speed: 40.0 + i as f32,
+                    steering_angle: 1.0 + i as f32,
+                };
 
-            publisher.publish(&vehicle_state)?;
+                publisher.publish(&vehicle_state)?;
 
-            println!("VehicleState published.");
+                std::thread::sleep(
+                    std::time::Duration::from_millis(100),
+                );
+            }
+
+            println!("VehicleState messages published.");
 
             loop {
                 std::thread::park();

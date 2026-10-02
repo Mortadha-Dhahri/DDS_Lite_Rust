@@ -103,9 +103,10 @@ fn main() -> io::Result<()> {
 
             println!("VehicleState messages published.");
 
-            loop {
-                std::thread::park();
-            }
+        loop {
+            publisher.receive_control()?;
+        }
+        
         }
 
         EndpointKind::Subscriber => {

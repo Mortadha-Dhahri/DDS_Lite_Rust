@@ -194,4 +194,32 @@ where
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.transport.local_addr()
     }
+
+    pub fn receive_control(&self) -> io::Result<()> {
+        let (bytes, sender) = self.transport.receive()?;
+
+        let message = crate::decode_network_message(&bytes)
+            .map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    error,
+                )
+            })?;
+
+        match message {
+            NetworkMessage::Control(control) => {
+                self.handle_control_message(control, sender)?;
+            }
+
+            NetworkMessage::Data(_) => {
+                println!(
+                    "Publisher received an unexpected data message \
+                    from {}.",
+                    sender
+                );
+            }
+        }
+
+        Ok(())
+    }
 }

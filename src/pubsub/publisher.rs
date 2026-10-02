@@ -2,18 +2,18 @@ use std::io;
 use std::net::SocketAddr;
 
 use crate::{
+    encode_network_message,
+    serialize_payload,
+    ControlMessage,
     EndpointKind,
     History,
     NetworkDiscovery,
+    NetworkMessage,
+    QosPolicy,
     Topic,
     Transport,
     UdpTransport,
     WireMessage,
-    serialize_payload,
-    qos::QosPolicy,
-    NetworkMessage,
-    encode_network_message,
-    ControlMessage
 };
 
 pub struct Publisher<T> {
@@ -30,7 +30,7 @@ where
     T: serde::Serialize + Clone,
 {
     pub fn new(
-        topic: Topic ,
+        topic: Topic,
         discovery: NetworkDiscovery,
         transport: UdpTransport,
         qos: QosPolicy,
@@ -40,18 +40,19 @@ where
             discovery,
             transport,
             history: History::new(qos.history_depth()),
-            next_sequence_number : 1, 
+            next_sequence_number: 1,
             _marker: std::marker::PhantomData,
         })
     }
 
     pub fn publish(&mut self, data: &T) -> io::Result<()> {
-        
         let sequence_number = self.next_sequence_number;
         self.next_sequence_number += 1;
 
-        self.history.push(sequence_number, data.clone());
-
+        self.history.push(
+            sequence_number,
+            data.clone(),
+        );
 
         let subscribers = self.discovery.lookup(
             self.topic.name(),
@@ -73,15 +74,17 @@ where
             payload,
         };
 
-        let network_message = NetworkMessage::Data(message);
+        let network_message =
+            NetworkMessage::Data(message);
 
-        let bytes = encode_network_message(&network_message)
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    error,
-                )
-            })?;
+        let bytes =
+            encode_network_message(&network_message)
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        error,
+                    )
+                })?;
 
         println!(
             "Publishing sequence {} to {} subscriber(s).",
@@ -97,10 +100,6 @@ where
         Ok(())
     }
 
-    pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.transport.local_addr()
-    }
-
     fn retransmit(
         &self,
         sequence_number: u64,
@@ -111,7 +110,7 @@ where
             None => {
                 println!(
                     "Cannot retransmit sequence {}: \
-                    sample is no longer in history.",
+                     sample is no longer in history.",
                     sequence_number
                 );
 
@@ -137,17 +136,19 @@ where
         let network_message =
             NetworkMessage::Data(message);
 
-        let bytes = encode_network_message(
-            &network_message,
-        )
-        .map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                error,
-            )
-        })?;
+        let bytes =
+            encode_network_message(&network_message)
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        error,
+                    )
+                })?;
 
-        self.transport.send(&bytes, destination)?;
+        self.transport.send(
+            &bytes,
+            destination,
+        )?;
 
         println!(
             "Retransmitted sequence {} to {}.",
@@ -157,11 +158,12 @@ where
 
         Ok(())
     }
+
     pub fn handle_control_message(
         &self,
         message: ControlMessage,
         sender: SocketAddr,
-    ) -> io::Result<()> {   
+    ) -> io::Result<()> {
         match message {
             ControlMessage::Nack {
                 topic,
@@ -187,5 +189,9 @@ where
         }
 
         Ok(())
-    }   
+    }
+
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.transport.local_addr()
+    }
 }

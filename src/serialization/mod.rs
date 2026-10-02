@@ -7,10 +7,10 @@ pub use codec::{
     deserialize_payload,
     encode_message,
     serialize_payload,
-    WireMessage
+    WireMessage,
 };
 
-pub use control::ControlMessage;
+pub use control::{ControlMessage,encode_control_message};
 
 pub use envelope::{
     decode_network_message,

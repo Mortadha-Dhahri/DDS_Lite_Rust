@@ -87,22 +87,36 @@ fn main() -> io::Result<()> {
                 runtime.transport,
                 qos,
             )?;
+        
+        let state_1 = VehicleState {
+            speed: 40.0,
+            steering_angle: 1.0,
+        };
 
-            for i in 0..5 {
-                let vehicle_state = VehicleState {
-                    speed: 40.0 + i as f32,
-                    steering_angle: 1.0 + i as f32,
-                };
+        let state_2 = VehicleState {
+            speed: 41.0,
+            steering_angle: 1.1,
+        };
 
-                publisher.publish(&vehicle_state)?;
+        let state_3 = VehicleState {
+            speed: 42.0,
+            steering_angle: 1.2,
+        };
 
-                std::thread::sleep(
-                    std::time::Duration::from_millis(100),
-                );
-            }
+        let state_4 = VehicleState {
+            speed: 43.0,
+            steering_angle: 1.3,
+        };
 
-            println!("VehicleState messages published.");
+        publisher.publish(&state_1)?;
+        publisher.publish(&state_2)?;
 
+        publisher.publish_without_sending(&state_3)?;
+
+        publisher.publish(&state_4)?;
+
+        println!("Test sequence 1, 2, 4 published. Sequence 3 was dropped.");
+        
         loop {
             publisher.receive_control()?;
         }

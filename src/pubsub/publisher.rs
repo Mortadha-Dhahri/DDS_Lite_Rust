@@ -222,4 +222,21 @@ where
 
         Ok(())
     }
+
+    pub fn publish_without_sending(&mut self, data: &T) -> io::Result<()> {
+        let sequence_number = self.next_sequence_number;
+        self.next_sequence_number += 1;
+
+        self.history.push(
+            sequence_number,
+            data.clone(),
+        );
+
+        println!(
+            "Simulating packet loss for sequence {}.",
+            sequence_number
+        );
+
+        Ok(())
+    }
 }

@@ -94,7 +94,6 @@ fn reliable_delivery_clears_pending_ack() {
     assert_eq!(publisher.pending_ack_count(), 0);
 }
 
-
 #[test]
 fn reliable_delivery_recovers_from_lost_ack() {
     let receiver = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -110,9 +109,7 @@ fn reliable_delivery_recovers_from_lost_ack() {
     let discovery_server_address = "127.0.0.1:6101".parse().unwrap();
 
     thread::spawn(move || {
-        let mut server =
-            dds_lite_rust::DiscoveryServer::bind(discovery_server_address)
-                .unwrap();
+        let mut server = dds_lite_rust::DiscoveryServer::bind(discovery_server_address).unwrap();
 
         server.run().unwrap();
     });
@@ -121,11 +118,8 @@ fn reliable_delivery_recovers_from_lost_ack() {
 
     let publisher_participant = Participant::new(3, publisher_address);
 
-    let discovery = NetworkDiscovery::bind(
-        "127.0.0.1:0".parse().unwrap(),
-        discovery_server_address,
-    )
-    .unwrap();
+    let discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address).unwrap();
 
     discovery
         .register_participant(&publisher_participant)
@@ -160,13 +154,8 @@ fn reliable_delivery_recovers_from_lost_ack() {
 
     let qos = QosPolicy::new(10, Reliability::Reliable);
 
-    let mut publisher = Publisher::<TestMessage>::new(
-        topic.clone(),
-        discovery,
-        transport,
-        qos,
-    )
-    .unwrap();
+    let mut publisher =
+        Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
 
     let message = TestMessage { value: 99 };
 
@@ -179,8 +168,7 @@ fn reliable_delivery_recovers_from_lost_ack() {
 
     let (size, _) = receiver.recv_from(&mut buffer).unwrap();
 
-    let first_message =
-        dds_lite_rust::decode_network_message(&buffer[..size]).unwrap();
+    let first_message = dds_lite_rust::decode_network_message(&buffer[..size]).unwrap();
 
     match first_message {
         dds_lite_rust::NetworkMessage::Data(data) => {
@@ -202,8 +190,7 @@ fn reliable_delivery_recovers_from_lost_ack() {
     // The retransmitted DATA packet should arrive.
     let (size, _) = receiver.recv_from(&mut buffer).unwrap();
 
-    let retransmitted =
-        dds_lite_rust::decode_network_message(&buffer[..size]).unwrap();
+    let retransmitted = dds_lite_rust::decode_network_message(&buffer[..size]).unwrap();
 
     match retransmitted {
         dds_lite_rust::NetworkMessage::Data(data) => {
@@ -213,19 +200,14 @@ fn reliable_delivery_recovers_from_lost_ack() {
     }
 
     // Now send the ACK manually.
-    let ack = dds_lite_rust::NetworkMessage::Control(
-        dds_lite_rust::ControlMessage::Ack {
-            topic: topic.name().to_string(),
-            sequence_number: 1,
-        },
-    );
+    let ack = dds_lite_rust::NetworkMessage::Control(dds_lite_rust::ControlMessage::Ack {
+        topic: topic.name().to_string(),
+        sequence_number: 1,
+    });
 
-    let ack_bytes =
-        dds_lite_rust::encode_network_message(&ack).unwrap();
+    let ack_bytes = dds_lite_rust::encode_network_message(&ack).unwrap();
 
-    receiver
-        .send_to(&ack_bytes, publisher_address)
-        .unwrap();
+    receiver.send_to(&ack_bytes, publisher_address).unwrap();
 
     publisher.receive_control().unwrap();
 

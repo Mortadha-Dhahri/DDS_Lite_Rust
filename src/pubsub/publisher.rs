@@ -1,7 +1,9 @@
 use std::io;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use crate::qos::reliability;
 use crate::{
     ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, Participant,
     QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage, decode_network_message,
@@ -14,10 +16,11 @@ pub struct Publisher<T> {
     topic: Topic,
     discovery: NetworkDiscovery,
     transport: UdpTransport,
+    qos: QosPolicy,
     history: History<T>,
     next_sequence_number: u64,
     pending_acks: HashMap<SocketAddr, HashMap<u64, Instant>>,
-    _marker: std::marker::PhantomData<T>,
+    _marker: PhantomData<T>,
 }
 
 impl<T> Publisher<T>
@@ -34,6 +37,7 @@ where
             topic,
             discovery,
             transport,
+            qos: qos.clone(),
             history: History::new(qos.history_depth()),
             next_sequence_number: 1,
             pending_acks: HashMap::new(),
@@ -75,10 +79,12 @@ where
         for subscriber in subscribers {
             self.transport.send(&bytes, subscriber.address)?;
 
-            self.pending_acks
-                .entry(subscriber.address)
-                .or_default()
-                .insert(sequence_number, Instant::now());
+            if self.is_reliable() {
+                self.pending_acks
+                    .entry(subscriber.address)
+                    .or_default()
+                    .insert(sequence_number, Instant::now());
+            }
         }
 
         Ok(())
@@ -174,6 +180,10 @@ where
 
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.transport.local_addr()
+    }
+
+    fn is_reliable(&self) -> bool {
+        self.qos.reliability() == Reliability::Reliable
     }
 
     pub fn receive_control(&mut self) -> io::Result<()> {

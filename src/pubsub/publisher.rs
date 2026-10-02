@@ -3,11 +3,12 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use crate::{
-    ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, QosPolicy, Topic,
-    Transport, UdpTransport, WireMessage, encode_network_message, serialize_payload,
+    ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, Participant,
+    QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage, decode_network_message,
+    deserialize_payload, encode_network_message, serialize_payload,
 };
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub struct Publisher<T> {
     topic: Topic,
@@ -222,5 +223,89 @@ where
                     })
             })
             .collect()
+    }
+    pub fn retransmit_expired_acknowledgements(&mut self, timeout: Duration) -> io::Result<()> {
+        let expired = self.expired_acknowledgements(timeout);
+
+        for (subscriber, sequence_number) in expired {
+            self.retransmit(sequence_number, subscriber)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::UdpSocket;
+    use std::time::Duration;
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+    struct TestMessage {
+        value: u32,
+    }
+
+    #[test]
+    fn expired_acknowledgement_is_retransmitted() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+
+        let publisher_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let publisher_address = publisher_socket.local_addr().unwrap();
+        drop(publisher_socket);
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let topic = Topic::new("test/topic", "TestMessage");
+
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let transport = UdpTransport::bind(publisher_address).unwrap();
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+
+        publisher.history.push(1, TestMessage { value: 42 });
+
+        publisher
+            .pending_acks
+            .entry(receiver_address)
+            .or_default()
+            .insert(1, Instant::now() - Duration::from_secs(1));
+
+        publisher
+            .retransmit_expired_acknowledgements(Duration::from_millis(100))
+            .unwrap();
+
+        let mut buffer = vec![0u8; 65_535];
+
+        let (size, sender) = receiver.recv_from(&mut buffer).unwrap();
+
+        assert_eq!(sender, publisher_address);
+
+        let network_message = decode_network_message(&buffer[..size]).unwrap();
+
+        match network_message {
+            NetworkMessage::Data(message) => {
+                assert_eq!(message.sequence_number, 1);
+                assert_eq!(message.topic, "test/topic");
+
+                let decoded: TestMessage = deserialize_payload(&message.payload).unwrap();
+
+                assert_eq!(decoded, TestMessage { value: 42 });
+            }
+            NetworkMessage::Control(_) => {
+                panic!("Expected a data message");
+            }
+        }
     }
 }

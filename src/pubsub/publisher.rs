@@ -1,5 +1,6 @@
-use std::net::SocketAddr;
 use std::io;
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 use crate::{
     ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, QosPolicy, Topic,
@@ -14,7 +15,7 @@ pub struct Publisher<T> {
     transport: UdpTransport,
     history: History<T>,
     next_sequence_number: u64,
-    pending_acks: HashMap<SocketAddr, HashSet<u64>>,
+    pending_acks: HashMap<SocketAddr, HashMap<u64, Instant>>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -76,7 +77,7 @@ where
             self.pending_acks
                 .entry(subscriber.address)
                 .or_default()
-                .insert(sequence_number);
+                .insert(sequence_number, Instant::now());
         }
 
         Ok(())
@@ -196,7 +197,30 @@ where
 
         Ok(())
     }
+
     pub fn pending_ack_count(&self) -> usize {
-        self.pending_acks.values().map(HashSet::len).sum()
+        self.pending_acks
+            .values()
+            .map(|pending| pending.len())
+            .sum()
+    }
+
+    pub fn expired_acknowledgements(&self, timeout: Duration) -> Vec<(SocketAddr, u64)> {
+        let now = Instant::now();
+
+        self.pending_acks
+            .iter()
+            .flat_map(|(subscriber, pending)| {
+                pending
+                    .iter()
+                    .filter_map(move |(sequence_number, sent_at)| {
+                        if now.duration_since(*sent_at) >= timeout {
+                            Some((*subscriber, *sequence_number))
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect()
     }
 }

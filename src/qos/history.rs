@@ -122,4 +122,16 @@ mod tests {
 
         assert!(history.find(3).is_none());
     }
+    #[test]
+    fn evicted_sequence_is_no_longer_available() {
+        let mut history = History::new(2);
+
+        history.push(1, "one");
+        history.push(2, "two");
+        history.push(3, "three");
+
+        assert!(history.find(1).is_none());
+        assert!(history.find(2).is_some());
+        assert!(history.find(3).is_some());
+    }
 }

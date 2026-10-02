@@ -1,19 +1,15 @@
 pub mod core;
 pub mod discovery;
-pub mod serialization;
-pub mod transport;
 pub mod pubsub;
 pub mod qos;
+pub mod serialization;
+pub mod transport;
 
-pub use core::{Participant,Topic,ParticipantRuntime};
+pub use core::{Participant, ParticipantRuntime, Topic};
 
-pub use discovery::{
-    EndpointKind,
-    NetworkDiscovery,
-    DiscoveryServer
-};
+pub use discovery::{DiscoveryServer, EndpointKind, NetworkDiscovery};
 
-pub use transport::{UdpTransport,Transport};
+pub use pubsub::{Publisher, Subscriber};
+pub use qos::{History, QosPolicy, Reliability, SequenceEvent, SequenceTracker};
 pub use serialization::*;
-pub use pubsub::{Publisher,Subscriber};
-pub use qos::{History, QosPolicy,Reliability,SequenceTracker,SequenceEvent};
+pub use transport::{Transport, UdpTransport};

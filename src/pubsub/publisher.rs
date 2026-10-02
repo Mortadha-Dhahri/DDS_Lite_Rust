@@ -2,18 +2,8 @@ use std::io;
 use std::net::SocketAddr;
 
 use crate::{
-    encode_network_message,
-    serialize_payload,
-    ControlMessage,
-    EndpointKind,
-    History,
-    NetworkDiscovery,
-    NetworkMessage,
-    QosPolicy,
-    Topic,
-    Transport,
-    UdpTransport,
-    WireMessage,
+    ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, QosPolicy, Topic,
+    Transport, UdpTransport, WireMessage, encode_network_message, serialize_payload,
 };
 
 pub struct Publisher<T> {
@@ -49,23 +39,14 @@ where
         let sequence_number = self.next_sequence_number;
         self.next_sequence_number += 1;
 
-        self.history.push(
-            sequence_number,
-            data.clone(),
-        );
+        self.history.push(sequence_number, data.clone());
 
-        let subscribers = self.discovery.lookup(
-            self.topic.name(),
-            EndpointKind::Subscriber,
-        )?;
+        let subscribers = self
+            .discovery
+            .lookup(self.topic.name(), EndpointKind::Subscriber)?;
 
         let payload = serialize_payload(data)
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    error,
-                )
-            })?;
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         let message = WireMessage {
             sequence_number,
@@ -74,17 +55,10 @@ where
             payload,
         };
 
-        let network_message =
-            NetworkMessage::Data(message);
+        let network_message = NetworkMessage::Data(message);
 
-        let bytes =
-            encode_network_message(&network_message)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error,
-                    )
-                })?;
+        let bytes = encode_network_message(&network_message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         println!(
             "Publishing sequence {} to {} subscriber(s).",
@@ -93,18 +67,13 @@ where
         );
 
         for subscriber in subscribers {
-            self.transport
-                .send(&bytes, subscriber.address)?;
+            self.transport.send(&bytes, subscriber.address)?;
         }
 
         Ok(())
     }
 
-    fn retransmit(
-        &self,
-        sequence_number: u64,
-        destination: SocketAddr,
-    ) -> io::Result<()> {
+    pub fn retransmit(&self, sequence_number: u64, destination: SocketAddr) -> io::Result<()> {
         let entry = match self.history.find(sequence_number) {
             Some(entry) => entry,
             None => {
@@ -119,12 +88,7 @@ where
         };
 
         let payload = serialize_payload(entry.data())
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    error,
-                )
-            })?;
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         let message = WireMessage {
             sequence_number: entry.sequence_number(),
@@ -133,27 +97,16 @@ where
             payload,
         };
 
-        let network_message =
-            NetworkMessage::Data(message);
+        let network_message = NetworkMessage::Data(message);
 
-        let bytes =
-            encode_network_message(&network_message)
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error,
-                    )
-                })?;
+        let bytes = encode_network_message(&network_message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-        self.transport.send(
-            &bytes,
-            destination,
-        )?;
+        self.transport.send(&bytes, destination)?;
 
         println!(
             "Retransmitted sequence {} to {}.",
-            sequence_number,
-            destination
+            sequence_number, destination
         );
 
         Ok(())
@@ -175,15 +128,11 @@ where
 
                 println!(
                     "Received NACK from {} for sequences: {:?}",
-                    sender,
-                    missing_sequences
+                    sender, missing_sequences
                 );
 
                 for sequence_number in missing_sequences {
-                    self.retransmit(
-                        sequence_number,
-                        sender,
-                    )?;
+                    self.retransmit(sequence_number, sender)?;
                 }
             }
         }
@@ -199,12 +148,7 @@ where
         let (bytes, sender) = self.transport.receive()?;
 
         let message = crate::decode_network_message(&bytes)
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    error,
-                )
-            })?;
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         match message {
             NetworkMessage::Control(control) => {
@@ -219,23 +163,6 @@ where
                 );
             }
         }
-
-        Ok(())
-    }
-
-    pub fn publish_without_sending(&mut self, data: &T) -> io::Result<()> {
-        let sequence_number = self.next_sequence_number;
-        self.next_sequence_number += 1;
-
-        self.history.push(
-            sequence_number,
-            data.clone(),
-        );
-
-        println!(
-            "Simulating packet loss for sequence {}.",
-            sequence_number
-        );
 
         Ok(())
     }

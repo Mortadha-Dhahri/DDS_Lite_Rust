@@ -3,14 +3,11 @@ use crate::Reliability;
 #[derive(Debug, Clone)]
 pub struct QosPolicy {
     history_depth: usize,
-    reliability: Reliability
+    reliability: Reliability,
 }
 
 impl QosPolicy {
-    pub fn new(
-        history_depth: usize,
-        reliability: Reliability,
-    ) -> Self {
+    pub fn new(history_depth: usize, reliability: Reliability) -> Self {
         Self {
             history_depth,
             reliability,

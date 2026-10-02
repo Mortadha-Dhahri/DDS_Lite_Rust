@@ -1,6 +1,6 @@
 /*
 
-Conceptually : 
+Conceptually :
 
 Participant → Server
 
@@ -15,8 +15,8 @@ REGISTER_ENDPOINT
 
 LOOKUP
     topic
-    kind 
-    
+    kind
+
 */
 
 use serde::{Deserialize, Serialize};

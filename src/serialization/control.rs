@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq,Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum ControlMessage {
     Nack {
         topic: String,
@@ -13,30 +13,21 @@ pub struct ControlEnvelope {
     pub message: ControlMessage,
 }
 
-pub fn encode_control_message(
-    message: &ControlMessage,
-) -> Result<Vec<u8>, bincode::Error> {
+pub fn encode_control_message(message: &ControlMessage) -> Result<Vec<u8>, bincode::Error> {
     bincode::serialize(&ControlEnvelope {
         message: message.clone(),
     })
 }
 
-pub fn decode_control_message(
-    bytes: &[u8],
-) -> Result<ControlMessage, bincode::Error> {
-    let envelope: ControlEnvelope =
-        bincode::deserialize(bytes)?;
+pub fn decode_control_message(bytes: &[u8]) -> Result<ControlMessage, bincode::Error> {
+    let envelope: ControlEnvelope = bincode::deserialize(bytes)?;
 
     Ok(envelope.message)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        decode_control_message,
-        encode_control_message,
-        ControlMessage,
-    };
+    use super::{ControlMessage, decode_control_message, encode_control_message};
 
     #[test]
     fn nack_round_trip() {
@@ -45,11 +36,9 @@ mod tests {
             missing_sequences: vec![3, 4, 5],
         };
 
-        let encoded =
-            encode_control_message(&message).unwrap();
+        let encoded = encode_control_message(&message).unwrap();
 
-        let decoded =
-            decode_control_message(&encoded).unwrap();
+        let decoded = decode_control_message(&encoded).unwrap();
 
         assert_eq!(decoded, message);
     }
@@ -61,11 +50,9 @@ mod tests {
             missing_sequences: Vec::new(),
         };
 
-        let encoded =
-            encode_control_message(&message).unwrap();
+        let encoded = encode_control_message(&message).unwrap();
 
-        let decoded =
-            decode_control_message(&encoded).unwrap();
+        let decoded = decode_control_message(&encoded).unwrap();
 
         assert_eq!(decoded, message);
     }

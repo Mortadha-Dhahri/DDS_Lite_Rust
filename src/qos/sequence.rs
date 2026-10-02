@@ -35,8 +35,7 @@ impl SequenceTracker {
 
         // A new sequence arrived after the current one.
         if sequence > self.last_sequence {
-            let missing: Vec<u64> =
-                ((self.last_sequence + 1)..sequence).collect();
+            let missing: Vec<u64> = ((self.last_sequence + 1)..sequence).collect();
 
             for sequence in &missing {
                 self.missing_sequences.insert(*sequence);
@@ -88,15 +87,9 @@ mod tests {
 
         tracker.observe(1);
 
-        assert_eq!(
-            tracker.observe(2),
-            SequenceEvent::Contiguous
-        );
+        assert_eq!(tracker.observe(2), SequenceEvent::Contiguous);
 
-        assert_eq!(
-            tracker.observe(3),
-            SequenceEvent::Contiguous
-        );
+        assert_eq!(tracker.observe(3), SequenceEvent::Contiguous);
 
         assert!(!tracker.has_missing());
     }
@@ -124,13 +117,9 @@ mod tests {
         tracker.observe(1);
         tracker.observe(4);
 
-        assert_eq!(
-            tracker.observe(2),
-            SequenceEvent::Late
-        );
+        assert_eq!(tracker.observe(2), SequenceEvent::Late);
 
-        let missing: Vec<_> =
-            tracker.missing_sequences().copied().collect();
+        let missing: Vec<_> = tracker.missing_sequences().copied().collect();
 
         assert_eq!(missing, vec![3]);
     }
@@ -142,10 +131,7 @@ mod tests {
         tracker.observe(1);
         tracker.observe(2);
 
-        assert_eq!(
-            tracker.observe(2),
-            SequenceEvent::Duplicate
-        );
+        assert_eq!(tracker.observe(2), SequenceEvent::Duplicate);
 
         assert_eq!(tracker.last_sequence(), 2);
     }
@@ -162,9 +148,6 @@ mod tests {
 
         assert!(!tracker.has_missing());
 
-        assert_eq!(
-            tracker.observe(3),
-            SequenceEvent::Duplicate
-        );
+        assert_eq!(tracker.observe(3), SequenceEvent::Duplicate);
     }
 }

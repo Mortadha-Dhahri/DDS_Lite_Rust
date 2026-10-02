@@ -1,4 +1,4 @@
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WireMessage {
@@ -12,9 +12,7 @@ pub fn serialize_payload<T: Serialize>(value: &T) -> Result<Vec<u8>, bincode::Er
     bincode::serialize(value)
 }
 
-pub fn deserialize_payload<T: DeserializeOwned>(
-    bytes: &[u8],
-) -> Result<T, bincode::Error> {
+pub fn deserialize_payload<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, bincode::Error> {
     bincode::deserialize(bytes)
 }
 

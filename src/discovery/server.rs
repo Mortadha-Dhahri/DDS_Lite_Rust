@@ -1,25 +1,15 @@
+use crate::core::Participant;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
-use crate::core::Participant;
 
-
-use super::{
-    Discovery,
-    DiscoveryRequest,
-    DiscoveryResponse,
-    Endpoint,
-    LocalDiscovery,
-};
+use super::{Discovery, DiscoveryRequest, DiscoveryResponse, Endpoint, LocalDiscovery};
 
 pub struct DiscoveryServer {
     socket: UdpSocket,
     discovery: LocalDiscovery,
 }
 
-
-
 impl DiscoveryServer {
-
     pub fn bind(address: SocketAddr) -> io::Result<Self> {
         let socket = UdpSocket::bind(address)?;
 
@@ -33,17 +23,13 @@ impl DiscoveryServer {
         self.socket.local_addr()
     }
 
-    fn handle_request(
-        &mut self,
-        request: DiscoveryRequest,
-    ) -> DiscoveryResponse {
+    fn handle_request(&mut self, request: DiscoveryRequest) -> DiscoveryResponse {
         match request {
             DiscoveryRequest::RegisterParticipant {
                 participant_id,
                 address,
             } => {
-                let participant =
-                    Participant::new(participant_id, address);
+                let participant = Participant::new(participant_id, address);
 
                 self.discovery.register_participant(participant);
 
@@ -67,27 +53,21 @@ impl DiscoveryServer {
             }
 
             DiscoveryRequest::Lookup { topic, kind } => {
-                let endpoints =
-                    self.discovery.lookup(&topic, kind);
+                let endpoints = self.discovery.lookup(&topic, kind);
 
                 let discovered = endpoints
                     .into_iter()
                     .filter_map(|endpoint| {
                         let address = self
                             .discovery
-                            .participant_address(
-                                endpoint.participant_id,
-                            )?;
+                            .participant_address(endpoint.participant_id)?;
 
-                        Some(
-                            super::DiscoveredEndpoint {
-                                participant_id:
-                                    endpoint.participant_id,
-                                topic: endpoint.topic,
-                                address,
-                                kind: endpoint.kind,
-                            },
-                        )
+                        Some(super::DiscoveredEndpoint {
+                            participant_id: endpoint.participant_id,
+                            topic: endpoint.topic,
+                            address,
+                            kind: endpoint.kind,
+                        })
                     })
                     .collect();
 
@@ -102,31 +82,15 @@ impl DiscoveryServer {
         let mut buffer = [0u8; 65_535];
 
         loop {
-            let (size, sender) =
-                self.socket.recv_from(&mut buffer)?;
+            let (size, sender) = self.socket.recv_from(&mut buffer)?;
 
-            let request =
-                bincode::deserialize::<DiscoveryRequest>(
-                    &buffer[..size],
-                )
-                .map_err(|error| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        error,
-                    )
-                })?;
+            let request = bincode::deserialize::<DiscoveryRequest>(&buffer[..size])
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-            let response =
-                self.handle_request(request);
+            let response = self.handle_request(request);
 
-            let bytes =
-                bincode::serialize(&response)
-                    .map_err(|error| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            error,
-                        )
-                    })?;
+            let bytes = bincode::serialize(&response)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
             self.socket.send_to(&bytes, sender)?;
         }

@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use crate::qos::reliability;
 use crate::{
-    ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, Participant,
-    QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage, decode_network_message,
-    deserialize_payload, encode_network_message, serialize_payload,
+    ControlMessage, DiscoveryServer, EndpointKind, History, NetworkDiscovery, NetworkMessage,
+    Participant, QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage,
+    decode_network_message, deserialize_payload, encode_network_message, serialize_payload,
 };
 
 use std::collections::HashMap;
@@ -259,19 +259,28 @@ mod tests {
     struct TestMessage {
         value: u32,
     }
-
     #[test]
     fn expired_acknowledgement_is_retransmitted() {
+        println!("STEP 1: bind receiver");
+
         let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let receiver_address = receiver.local_addr().unwrap();
+
         receiver
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
 
-        let receiver_address = receiver.local_addr().unwrap();
+        println!("receiver = {}", receiver_address);
 
-        let publisher_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let publisher_address = publisher_socket.local_addr().unwrap();
-        drop(publisher_socket);
+        println!("STEP 2: bind publisher transport");
+
+        let publisher_address = "127.0.0.1:7202".parse().unwrap();
+
+        let transport = UdpTransport::bind(publisher_address).unwrap();
+
+        println!("publisher transport bound");
+
+        println!("STEP 3: create publisher");
 
         let discovery = NetworkDiscovery::bind(
             "127.0.0.1:0".parse().unwrap(),
@@ -283,12 +292,18 @@ mod tests {
 
         let qos = QosPolicy::new(10, Reliability::Reliable);
 
-        let transport = UdpTransport::bind(publisher_address).unwrap();
-
         let mut publisher =
             Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
 
+        println!("publisher created");
+
+        println!("STEP 4: populate history");
+
         publisher.history.push(1, TestMessage { value: 42 });
+
+        println!("history populated");
+
+        println!("STEP 5: create expired ACK");
 
         publisher
             .pending_acks
@@ -296,13 +311,23 @@ mod tests {
             .or_default()
             .insert(1, Instant::now() - Duration::from_secs(1));
 
+        println!("pending ACK populated");
+
+        println!("STEP 6: retransmit expired ACK");
+
         publisher
             .retransmit_expired_acknowledgements(Duration::from_millis(100))
             .unwrap();
 
+        println!("retransmit returned");
+
+        println!("STEP 7: receive retransmitted packet");
+
         let mut buffer = vec![0u8; 65_535];
 
         let (size, sender) = receiver.recv_from(&mut buffer).unwrap();
+
+        println!("received {} bytes from {}", size, sender);
 
         assert_eq!(sender, publisher_address);
 
@@ -317,26 +342,35 @@ mod tests {
 
                 assert_eq!(decoded, TestMessage { value: 42 });
             }
+
             NetworkMessage::Control(_) => {
                 panic!("Expected a data message");
             }
         }
     }
+
     #[test]
     fn best_effort_does_not_track_acknowledgements() {
-        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        std::thread::spawn(|| {
+            let mut server = DiscoveryServer::bind("127.0.0.1:6203".parse().unwrap()).unwrap();
+
+            server.run().unwrap();
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        let receiver = UdpSocket::bind("127.0.0.1:7331").unwrap();
         let receiver_address = receiver.local_addr().unwrap();
 
-        let publisher_address = "127.0.0.1:7201".parse().unwrap();
+        let publisher_address = "127.0.0.1:7332".parse().unwrap();
 
         let discovery = NetworkDiscovery::bind(
             "127.0.0.1:0".parse().unwrap(),
-            "127.0.0.1:6000".parse().unwrap(),
+            "127.0.0.1:6203".parse().unwrap(),
         )
         .unwrap();
 
         let publisher_participant = Participant::new(1, publisher_address);
-
         let subscriber_participant = Participant::new(2, receiver_address);
 
         discovery
@@ -375,5 +409,96 @@ mod tests {
         publisher.publish(&TestMessage { value: 42 }).unwrap();
 
         assert_eq!(publisher.pending_ack_count(), 0);
+    }
+    #[test]
+    fn best_effort_ignores_nack() {
+        std::thread::spawn(|| {
+            let mut server = DiscoveryServer::bind("127.0.0.1:6201".parse().unwrap()).unwrap();
+
+            server.run().unwrap();
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        let receiver = UdpSocket::bind("127.0.0.1:7301").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+        let publisher_address = "127.0.0.1:7302".parse().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6201".parse().unwrap(),
+        )
+        .unwrap();
+
+        let publisher_participant = Participant::new(1, publisher_address);
+        let subscriber_participant = Participant::new(2, receiver_address);
+
+        discovery
+            .register_participant(&publisher_participant)
+            .unwrap();
+
+        discovery
+            .register_participant(&subscriber_participant)
+            .unwrap();
+
+        let topic = Topic::new("test/nack-qos", "TestMessage");
+
+        discovery
+            .register_endpoint(
+                publisher_participant.id(),
+                topic.name(),
+                EndpointKind::Publisher,
+            )
+            .unwrap();
+
+        discovery
+            .register_endpoint(
+                subscriber_participant.id(),
+                topic.name(),
+                EndpointKind::Subscriber,
+            )
+            .unwrap();
+
+        let transport = UdpTransport::bind(publisher_address).unwrap();
+
+        let qos = QosPolicy::new(10, Reliability::BestEffort);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        // Populate publisher history and send the initial DATA packet.
+        publisher.publish(&TestMessage { value: 42 }).unwrap();
+
+        let mut buffer = vec![0u8; 65_535];
+
+        // Consume the original DATA packet.
+        receiver.recv_from(&mut buffer).unwrap();
+
+        let nack = ControlMessage::Nack {
+            topic: topic.name().to_string(),
+            missing_sequences: vec![1],
+        };
+
+        publisher
+            .handle_control_message(nack, receiver_address)
+            .unwrap();
+
+        // BestEffort must ignore the NACK and send no retransmission.
+        let result = receiver.recv_from(&mut buffer);
+
+        assert!(
+            matches!(
+                result,
+                Err(ref error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut
+            ),
+            "BestEffort publisher should not retransmit after NACK, got: {:?}",
+            result
+        );
     }
 }

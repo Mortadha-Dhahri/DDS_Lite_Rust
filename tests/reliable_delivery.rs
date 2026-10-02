@@ -5,8 +5,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use dds_lite_rust::{
-    EndpointKind, NetworkDiscovery, Participant, Publisher, QosPolicy, Reliability, Subscriber,
-    Topic, UdpTransport,
+    ControlMessage, DiscoveryServer, EndpointKind, NetworkDiscovery, NetworkMessage, Participant,
+    Publisher, QosPolicy, Reliability, Subscriber, Topic, UdpTransport, decode_network_message,
+    deserialize_payload,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -214,21 +215,30 @@ fn reliable_delivery_recovers_from_lost_ack() {
 
     assert_eq!(publisher.pending_ack_count(), 0);
 }
+
 #[test]
 fn reliable_tracks_acknowledgements() {
-    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    std::thread::spawn(|| {
+        let mut server =
+            DiscoveryServer::bind("127.0.0.1:6205".parse().unwrap()).unwrap();
+
+        server.run().unwrap();
+    });
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    let receiver = UdpSocket::bind("127.0.0.1:7351").unwrap();
     let receiver_address = receiver.local_addr().unwrap();
 
-    let publisher_address = "127.0.0.1:7202".parse().unwrap();
+    let publisher_address = "127.0.0.1:7352".parse().unwrap();
 
     let discovery = NetworkDiscovery::bind(
         "127.0.0.1:0".parse().unwrap(),
-        "127.0.0.1:6000".parse().unwrap(),
+        "127.0.0.1:6205".parse().unwrap(),
     )
     .unwrap();
 
     let publisher_participant = Participant::new(1, publisher_address);
-
     let subscriber_participant = Participant::new(2, receiver_address);
 
     discovery
@@ -239,7 +249,7 @@ fn reliable_tracks_acknowledgements() {
         .register_participant(&subscriber_participant)
         .unwrap();
 
-    let topic = Topic::new("test/qos", "TestMessage");
+    let topic = Topic::new("test/reliable", "TestMessage");
 
     discovery
         .register_endpoint(
@@ -261,9 +271,112 @@ fn reliable_tracks_acknowledgements() {
 
     let qos = QosPolicy::new(10, Reliability::Reliable);
 
-    let mut publisher = Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+    let mut publisher =
+        Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
 
     publisher.publish(&TestMessage { value: 42 }).unwrap();
 
     assert_eq!(publisher.pending_ack_count(), 1);
+}
+
+#[test]
+fn reliable_responds_to_nack() {
+    std::thread::spawn(|| {
+        let mut server = DiscoveryServer::bind("127.0.0.1:6202".parse().unwrap()).unwrap();
+
+        server.run().unwrap();
+    });
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    let receiver = UdpSocket::bind("127.0.0.1:7321").unwrap();
+
+    receiver
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+
+    let receiver_address = receiver.local_addr().unwrap();
+    let publisher_address = "127.0.0.1:7322".parse().unwrap();
+
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6202".parse().unwrap(),
+    )
+    .unwrap();
+
+    let publisher_participant = Participant::new(1, publisher_address);
+    let subscriber_participant = Participant::new(2, receiver_address);
+
+    discovery
+        .register_participant(&publisher_participant)
+        .unwrap();
+
+    discovery
+        .register_participant(&subscriber_participant)
+        .unwrap();
+
+    let topic = Topic::new("test/nack-qos", "TestMessage");
+
+    discovery
+        .register_endpoint(
+            publisher_participant.id(),
+            topic.name(),
+            EndpointKind::Publisher,
+        )
+        .unwrap();
+
+    discovery
+        .register_endpoint(
+            subscriber_participant.id(),
+            topic.name(),
+            EndpointKind::Subscriber,
+        )
+        .unwrap();
+
+    let transport = UdpTransport::bind(publisher_address).unwrap();
+
+    let qos = QosPolicy::new(10, Reliability::Reliable);
+
+    let mut publisher =
+        Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+    // Send the original DATA packet and populate publisher history.
+    publisher.publish(&TestMessage { value: 42 }).unwrap();
+
+    let mut buffer = vec![0u8; 65_535];
+
+    // Consume the original DATA packet.
+    receiver.recv_from(&mut buffer).unwrap();
+
+    let nack = ControlMessage::Nack {
+        topic: topic.name().to_string(),
+        missing_sequences: vec![1],
+    };
+
+    publisher
+        .handle_control_message(nack, receiver_address)
+        .unwrap();
+
+    // Reliable mode must retransmit the missing sequence.
+    let (size, sender) = receiver.recv_from(&mut buffer).unwrap();
+
+    assert_eq!(sender, publisher_address);
+
+    let message = decode_network_message(&buffer[..size]).unwrap();
+
+    match message {
+        NetworkMessage::Data(data) => {
+            assert_eq!(data.sequence_number, 1);
+            assert_eq!(data.topic, topic.name());
+            assert_eq!(data.type_name, topic.type_name());
+
+            let decoded: TestMessage = deserialize_payload(&data.payload).unwrap();
+
+            assert_eq!(decoded, TestMessage { value: 42 });
+        }
+
+        NetworkMessage::Control(_) => {
+            panic!("Expected retransmitted DATA message");
+        }
+    }
 }

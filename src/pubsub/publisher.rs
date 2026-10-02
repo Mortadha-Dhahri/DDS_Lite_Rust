@@ -143,6 +143,10 @@ where
                     return Ok(());
                 }
 
+                if !self.is_reliable() {
+                    return Ok(());
+                }
+
                 println!(
                     "Received NACK from {} for sequences: {:?}",
                     sender, missing_sequences

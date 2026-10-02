@@ -1,6 +1,6 @@
+use std::net::UdpSocket;
 use std::thread;
 use std::time::Duration;
-use std::net::UdpSocket;
 
 use serde::{Deserialize, Serialize};
 

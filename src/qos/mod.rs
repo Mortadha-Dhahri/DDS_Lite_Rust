@@ -4,6 +4,6 @@ pub mod reliability;
 pub mod sequence;
 
 pub use policy::QosPolicy;
-pub use history::History;
+pub use history::{History,HistoryEntry};
 pub use reliability::Reliability;
 pub use sequence::{SequenceTracker,SequenceEvent};

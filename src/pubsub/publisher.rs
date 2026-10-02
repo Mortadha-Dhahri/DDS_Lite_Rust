@@ -35,12 +35,12 @@ where
     }
 
     pub fn publish(&mut self, data: &T) -> io::Result<()> {
-
-        self.history.push(data.clone());
-
+        
         let sequence_number = self.next_sequence_number;
-
         self.next_sequence_number += 1;
+
+        self.history.push(sequence_number, data.clone());
+
 
         let subscribers = self.discovery.lookup(
             self.topic.name(),

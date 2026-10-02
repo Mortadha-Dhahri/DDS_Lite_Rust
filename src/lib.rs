@@ -16,4 +16,4 @@ pub use discovery::{
 pub use transport::{UdpTransport,Transport};
 pub use serialization::*;
 pub use pubsub::{Publisher,Subscriber};
-pub use qos::{History, QosPolicy,Reliability};
+pub use qos::{History, QosPolicy,Reliability,SequenceTracker};

@@ -9,13 +9,14 @@ use crate::{
     Topic,
     Transport,
     UdpTransport,
+    SequenceTracker
 };
 
 pub struct Subscriber<T> {
     topic: Topic,
     _discovery: NetworkDiscovery,
     transport: UdpTransport,
-    last_sequence_number: u64,
+    sequence_tracker: SequenceTracker,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -32,7 +33,7 @@ where
             topic,
             _discovery: discovery,
             transport,
-            last_sequence_number:0,
+            sequence_tracker:SequenceTracker::new(),
             _marker: std::marker::PhantomData,
         })
     }
@@ -59,17 +60,33 @@ where
                 continue;
             }
             
+            let sequence_number = message.sequence_number;
 
-            if message.sequence_number <= self.last_sequence_number {
+            self.sequence_tracker.observe(sequence_number);
+
+            if sequence_number < self.sequence_tracker.last_sequence()
+                && !self
+                    .sequence_tracker
+                    .missing_sequences()
+                    .any(|missing| *missing == sequence_number)
+            {
                 println!(
-                    "Ignoring duplicate or out-of-order message: sequence {}",
-                    message.sequence_number
+                    "Ignoring duplicate or old message: sequence {}",
+                    sequence_number
                 );
 
                 continue;
             }
 
-            self.last_sequence_number = message.sequence_number;
+            if self.sequence_tracker.has_missing() {
+                println!(
+                    "Missing sequence(s): {:?}",
+                    self.sequence_tracker
+                        .missing_sequences()
+                        .copied()
+                        .collect::<Vec<_>>()
+                );
+            }
 
             let data = deserialize_payload::<T>(
                 &message.payload,

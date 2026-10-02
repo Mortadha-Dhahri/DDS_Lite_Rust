@@ -95,6 +95,8 @@ where
             let data = deserialize_payload::<T>(&message.payload)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
+            self.send_ack(&sender, message.sequence_number)?;
+
             return Ok(data);
         }
     }
@@ -116,6 +118,27 @@ where
         self.transport.send(&bytes, *destination)?;
 
         println!("Sent NACK to {}.", destination);
+
+        Ok(())
+    }
+
+    fn send_ack(&self, destination: &SocketAddr, sequence_number: u64) -> io::Result<()> {
+        let control_message = ControlMessage::Ack {
+            topic: self.topic.name().to_string(),
+            sequence_number,
+        };
+
+        let network_message = NetworkMessage::Control(control_message);
+
+        let bytes = crate::encode_network_message(&network_message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+        self.transport.send(&bytes, *destination)?;
+
+        println!(
+            "Sent ACK for sequence {} to {}.",
+            sequence_number, destination
+        );
 
         Ok(())
     }

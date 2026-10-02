@@ -135,6 +135,19 @@ where
                     self.retransmit(sequence_number, sender)?;
                 }
             }
+            ControlMessage::Ack {
+                topic,
+                sequence_number,
+            } => {
+                if topic != self.topic.name() {
+                    return Ok(());
+                }
+
+                println!(
+                    "Received ACK from {} for sequence {}.",
+                    sender, sequence_number
+                );
+            }
         }
 
         Ok(())

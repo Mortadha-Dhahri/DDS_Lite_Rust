@@ -1,10 +1,12 @@
-use std::io;
 use std::net::SocketAddr;
+use std::io;
 
 use crate::{
     ControlMessage, EndpointKind, History, NetworkDiscovery, NetworkMessage, QosPolicy, Topic,
     Transport, UdpTransport, WireMessage, encode_network_message, serialize_payload,
 };
+
+use std::collections::{HashMap, HashSet};
 
 pub struct Publisher<T> {
     topic: Topic,
@@ -12,6 +14,7 @@ pub struct Publisher<T> {
     transport: UdpTransport,
     history: History<T>,
     next_sequence_number: u64,
+    pending_acks: HashMap<SocketAddr, HashSet<u64>>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -31,6 +34,7 @@ where
             transport,
             history: History::new(qos.history_depth()),
             next_sequence_number: 1,
+            pending_acks: HashMap::new(),
             _marker: std::marker::PhantomData,
         })
     }
@@ -68,6 +72,11 @@ where
 
         for subscriber in subscribers {
             self.transport.send(&bytes, subscriber.address)?;
+
+            self.pending_acks
+                .entry(subscriber.address)
+                .or_default()
+                .insert(sequence_number);
         }
 
         Ok(())
@@ -113,7 +122,7 @@ where
     }
 
     pub fn handle_control_message(
-        &self,
+        &mut self,
         message: ControlMessage,
         sender: SocketAddr,
     ) -> io::Result<()> {
@@ -147,6 +156,14 @@ where
                     "Received ACK from {} for sequence {}.",
                     sender, sequence_number
                 );
+
+                if let Some(pending) = self.pending_acks.get_mut(&sender) {
+                    pending.remove(&sequence_number);
+
+                    if pending.is_empty() {
+                        self.pending_acks.remove(&sender);
+                    }
+                }
             }
         }
 
@@ -157,7 +174,7 @@ where
         self.transport.local_addr()
     }
 
-    pub fn receive_control(&self) -> io::Result<()> {
+    pub fn receive_control(&mut self) -> io::Result<()> {
         let (bytes, sender) = self.transport.receive()?;
 
         let message = crate::decode_network_message(&bytes)
@@ -178,5 +195,8 @@ where
         }
 
         Ok(())
+    }
+    pub fn pending_ack_count(&self) -> usize {
+        self.pending_acks.values().map(HashSet::len).sum()
     }
 }

@@ -6,10 +6,11 @@ use crate::{
     decode_message,
     deserialize_payload,
     NetworkDiscovery,
+    SequenceEvent,
+    SequenceTracker,
     Topic,
     Transport,
     UdpTransport,
-    SequenceTracker
 };
 
 pub struct Subscriber<T> {
@@ -33,7 +34,7 @@ where
             topic,
             _discovery: discovery,
             transport,
-            sequence_tracker:SequenceTracker::new(),
+            sequence_tracker: SequenceTracker::new(),
             _marker: std::marker::PhantomData,
         })
     }
@@ -59,33 +60,47 @@ where
 
                 continue;
             }
-            
+
             let sequence_number = message.sequence_number;
 
-            self.sequence_tracker.observe(sequence_number);
+            match self.sequence_tracker.observe(sequence_number) {
+                SequenceEvent::First => {
+                    println!(
+                        "Received first sequence: {}",
+                        sequence_number
+                    );
+                }
 
-            if sequence_number < self.sequence_tracker.last_sequence()
-                && !self
-                    .sequence_tracker
-                    .missing_sequences()
-                    .any(|missing| *missing == sequence_number)
-            {
-                println!(
-                    "Ignoring duplicate or old message: sequence {}",
-                    sequence_number
-                );
+                SequenceEvent::Contiguous => {
+                    println!(
+                        "Received sequence: {}",
+                        sequence_number
+                    );
+                }
 
-                continue;
-            }
+                SequenceEvent::Gap { missing } => {
+                    println!(
+                        "Gap detected at sequence {}. Missing: {:?}",
+                        sequence_number,
+                        missing
+                    );
+                }
 
-            if self.sequence_tracker.has_missing() {
-                println!(
-                    "Missing sequence(s): {:?}",
-                    self.sequence_tracker
-                        .missing_sequences()
-                        .copied()
-                        .collect::<Vec<_>>()
-                );
+                SequenceEvent::Late => {
+                    println!(
+                        "Received late sequence: {}",
+                        sequence_number
+                    );
+                }
+
+                SequenceEvent::Duplicate => {
+                    println!(
+                        "Ignoring duplicate sequence: {}",
+                        sequence_number
+                    );
+
+                    continue;
+                }
             }
 
             let data = deserialize_payload::<T>(

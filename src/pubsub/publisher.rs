@@ -139,7 +139,7 @@ where
                 topic,
                 missing_sequences,
             } => {
-                self.handle_nack(topic,missing_sequences,sender)?;
+                self.handle_nack(topic, missing_sequences, sender)?;
             }
             ControlMessage::Ack {
                 topic,

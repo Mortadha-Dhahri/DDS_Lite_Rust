@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use crate::qos::reliability;
 use crate::{
     ControlMessage, DiscoveryServer, EndpointKind, History, NetworkDiscovery, NetworkMessage,
     Participant, QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage,

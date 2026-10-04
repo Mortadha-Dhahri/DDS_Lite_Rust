@@ -68,3 +68,9 @@ impl LocalDiscovery {
             .map(|participant| participant.address())
     }
 }
+
+impl Default for LocalDiscovery {
+    fn default() -> Self {
+        Self::new()
+    }
+}

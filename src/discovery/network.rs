@@ -43,7 +43,7 @@ impl NetworkDiscovery {
         match self.request(request)? {
             DiscoveryResponse::Registered => Ok(()),
 
-            DiscoveryResponse::Error(message) => Err(io::Error::new(io::ErrorKind::Other, message)),
+            DiscoveryResponse::Error(message) => Err(io::Error::other(message)),
 
             response => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -67,7 +67,7 @@ impl NetworkDiscovery {
         match self.request(request)? {
             DiscoveryResponse::Registered => Ok(()),
 
-            DiscoveryResponse::Error(message) => Err(io::Error::new(io::ErrorKind::Other, message)),
+            DiscoveryResponse::Error(message) => Err(io::Error::other(message)),
 
             response => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -89,7 +89,7 @@ impl NetworkDiscovery {
         match self.request(request)? {
             DiscoveryResponse::Endpoints(endpoints) => Ok(endpoints),
 
-            DiscoveryResponse::Error(message) => Err(io::Error::new(io::ErrorKind::Other, message)),
+            DiscoveryResponse::Error(message) => Err(io::Error::other(message)),
 
             response => Err(io::Error::new(
                 io::ErrorKind::InvalidData,

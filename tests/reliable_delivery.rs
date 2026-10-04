@@ -463,8 +463,7 @@ fn best_effort_does_not_retransmit_after_timeout() {
 #[test]
 fn reliable_process_reliability_retransmits_expired_ack() {
     std::thread::spawn(|| {
-        let mut server =
-            DiscoveryServer::bind("127.0.0.1:6207".parse().unwrap()).unwrap();
+        let mut server = DiscoveryServer::bind("127.0.0.1:6207".parse().unwrap()).unwrap();
 
         server.run().unwrap();
     });
@@ -518,8 +517,7 @@ fn reliable_process_reliability_retransmits_expired_ack() {
 
     let qos = QosPolicy::new(10, Reliability::Reliable);
 
-    let mut publisher =
-        Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
 
     publisher.publish(&TestMessage { value: 42 }).unwrap();
 

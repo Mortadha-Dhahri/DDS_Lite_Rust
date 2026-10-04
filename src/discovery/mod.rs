@@ -1,3 +1,4 @@
+#![allow(clippy::module_inception)]
 pub mod discovery;
 pub mod network;
 pub mod protocol;

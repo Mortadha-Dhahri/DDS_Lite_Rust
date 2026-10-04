@@ -139,22 +139,7 @@ where
                 topic,
                 missing_sequences,
             } => {
-                if topic != self.topic.name() {
-                    return Ok(());
-                }
-
-                if !self.is_reliable() {
-                    return Ok(());
-                }
-
-                println!(
-                    "Received NACK from {} for sequences: {:?}",
-                    sender, missing_sequences
-                );
-
-                for sequence_number in missing_sequences {
-                    self.retransmit(sequence_number, sender)?;
-                }
+                self.handle_nack(topic,missing_sequences,sender)?;
             }
             ControlMessage::Ack {
                 topic,
@@ -243,6 +228,39 @@ where
 
         for (subscriber, sequence_number) in expired {
             self.retransmit(sequence_number, subscriber)?;
+        }
+
+        Ok(())
+    }
+    pub fn process_reliability(&mut self, timeout: Duration) -> io::Result<()> {
+        if !self.is_reliable() {
+            return Ok(());
+        }
+
+        self.retransmit_expired_acknowledgements(timeout)
+    }
+
+    fn handle_nack(
+        &self,
+        topic: String,
+        missing_sequences: Vec<u64>,
+        sender: SocketAddr,
+    ) -> io::Result<()> {
+        if topic != self.topic.name() {
+            return Ok(());
+        }
+
+        if !self.is_reliable() {
+            return Ok(());
+        }
+
+        println!(
+            "Received NACK from {} for sequences: {:?}",
+            sender, missing_sequences
+        );
+
+        for sequence_number in missing_sequences {
+            self.retransmit(sequence_number, sender)?;
         }
 
         Ok(())

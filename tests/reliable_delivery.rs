@@ -219,8 +219,7 @@ fn reliable_delivery_recovers_from_lost_ack() {
 #[test]
 fn reliable_tracks_acknowledgements() {
     std::thread::spawn(|| {
-        let mut server =
-            DiscoveryServer::bind("127.0.0.1:6205".parse().unwrap()).unwrap();
+        let mut server = DiscoveryServer::bind("127.0.0.1:6205".parse().unwrap()).unwrap();
 
         server.run().unwrap();
     });
@@ -271,8 +270,7 @@ fn reliable_tracks_acknowledgements() {
 
     let qos = QosPolicy::new(10, Reliability::Reliable);
 
-    let mut publisher =
-        Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
 
     publisher.publish(&TestMessage { value: 42 }).unwrap();
 

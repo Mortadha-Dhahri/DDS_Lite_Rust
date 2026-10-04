@@ -460,3 +460,83 @@ fn best_effort_does_not_retransmit_after_timeout() {
         }
     }
 }
+#[test]
+fn reliable_process_reliability_retransmits_expired_ack() {
+    std::thread::spawn(|| {
+        let mut server =
+            DiscoveryServer::bind("127.0.0.1:6207".parse().unwrap()).unwrap();
+
+        server.run().unwrap();
+    });
+
+    std::thread::sleep(Duration::from_millis(100));
+
+    let receiver = UdpSocket::bind("127.0.0.1:7371").unwrap();
+    receiver
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+
+    let receiver_address = receiver.local_addr().unwrap();
+    let publisher_address = "127.0.0.1:7372".parse().unwrap();
+
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6207".parse().unwrap(),
+    )
+    .unwrap();
+
+    let publisher_participant = Participant::new(1, publisher_address);
+    let subscriber_participant = Participant::new(2, receiver_address);
+
+    discovery
+        .register_participant(&publisher_participant)
+        .unwrap();
+
+    discovery
+        .register_participant(&subscriber_participant)
+        .unwrap();
+
+    let topic = Topic::new("test/reliable", "TestMessage");
+
+    discovery
+        .register_endpoint(
+            publisher_participant.id(),
+            topic.name(),
+            EndpointKind::Publisher,
+        )
+        .unwrap();
+
+    discovery
+        .register_endpoint(
+            subscriber_participant.id(),
+            topic.name(),
+            EndpointKind::Subscriber,
+        )
+        .unwrap();
+
+    let transport = UdpTransport::bind(publisher_address).unwrap();
+
+    let qos = QosPolicy::new(10, Reliability::Reliable);
+
+    let mut publisher =
+        Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+
+    publisher.publish(&TestMessage { value: 42 }).unwrap();
+
+    let mut buffer = [0u8; 65_535];
+
+    let (first_size, _) = receiver.recv_from(&mut buffer).unwrap();
+
+    assert!(first_size > 0);
+    assert_eq!(publisher.pending_ack_count(), 1);
+
+    std::thread::sleep(Duration::from_millis(20));
+
+    publisher
+        .process_reliability(Duration::from_millis(10))
+        .unwrap();
+
+    let (second_size, _) = receiver.recv_from(&mut buffer).unwrap();
+
+    assert!(second_size > 0);
+}

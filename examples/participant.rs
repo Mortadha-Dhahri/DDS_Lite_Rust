@@ -80,8 +80,12 @@ fn main() -> io::Result<()> {
         }
 
         EndpointKind::Subscriber => {
-            let mut subscriber =
-                Subscriber::<VehicleState>::new(topic, runtime.discovery, runtime.transport)?;
+            let mut subscriber = Subscriber::<VehicleState>::new(
+                topic,
+                runtime.discovery,
+                runtime.transport,
+                QosPolicy::new(10, Reliability::Reliable),
+            )?;
 
             println!("Subscriber waiting for messages...");
 

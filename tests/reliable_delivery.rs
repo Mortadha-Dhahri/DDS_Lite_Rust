@@ -78,8 +78,13 @@ fn reliable_delivery_clears_pending_ack() {
     )
     .unwrap();
 
-    let mut subscriber =
-        Subscriber::<TestMessage>::new(topic, subscriber_discovery, subscriber_transport).unwrap();
+    let mut subscriber = Subscriber::<TestMessage>::new(
+        topic,
+        subscriber_discovery,
+        subscriber_transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
 
     let message = TestMessage { value: 42 };
 

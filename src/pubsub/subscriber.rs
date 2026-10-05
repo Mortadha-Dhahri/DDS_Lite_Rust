@@ -1,10 +1,11 @@
 use std::io;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 
 use crate::{
-    ControlMessage, LivelinessTracker, NetworkDiscovery, NetworkMessage, SequenceEvent,
+    ControlMessage, LivelinessTracker, NetworkDiscovery, NetworkMessage, QosPolicy, SequenceEvent,
     SequenceTracker, Topic, Transport, UdpTransport, decode_network_message, deserialize_payload,
 };
 
@@ -14,6 +15,7 @@ pub struct Subscriber<T> {
     transport: UdpTransport,
     sequence_tracker: SequenceTracker,
     liveliness: LivelinessTracker,
+    qos: QosPolicy,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -25,13 +27,15 @@ where
         topic: Topic,
         discovery: NetworkDiscovery,
         transport: UdpTransport,
+        qos: QosPolicy,
     ) -> io::Result<Self> {
         Ok(Self {
             topic,
             _discovery: discovery,
             transport,
             sequence_tracker: SequenceTracker::new(),
-            liveliness: LivelinessTracker::new(std::time::Duration::from_secs(3)),
+            liveliness: LivelinessTracker::new(qos.liveliness_timeout()),
+            qos,
             _marker: std::marker::PhantomData,
         })
     }
@@ -175,7 +179,16 @@ mod tests {
 
         let transport = UdpTransport::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();
 
-        let mut subscriber = Subscriber::<Vec<u8>>::new(topic, discovery, transport).unwrap();
+        let qos = QosPolicy::new(10, crate::Reliability::BestEffort)
+            .with_liveliness_timeout(Duration::from_secs(3));
+
+        let mut subscriber = Subscriber::<Vec<u8>>::new(
+            topic,
+            discovery,
+            transport,
+            QosPolicy::new(10, crate::Reliability::BestEffort),
+        )
+        .unwrap();
 
         let heartbeat = ControlMessage::Heartbeat { participant_id: 42 };
 

@@ -198,9 +198,6 @@ mod tests {
 
         let transport = UdpTransport::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();
 
-        let qos = QosPolicy::new(10, crate::Reliability::BestEffort)
-            .with_liveliness_timeout(Duration::from_secs(3));
-
         let mut subscriber = Subscriber::<Vec<u8>>::new(
             topic,
             discovery,

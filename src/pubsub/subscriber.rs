@@ -5,8 +5,9 @@ use std::time::Duration;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    ControlMessage, LivelinessTracker, NetworkDiscovery, NetworkMessage, QosPolicy, SequenceEvent,
-    SequenceTracker, Topic, Transport, UdpTransport, decode_network_message, deserialize_payload,
+    ControlMessage, LivelinessState, LivelinessTracker, NetworkDiscovery, NetworkMessage,
+    QosPolicy, SequenceEvent, SequenceTracker, Topic, Transport, UdpTransport,
+    decode_network_message, deserialize_payload,
 };
 
 pub struct Subscriber<T> {
@@ -156,6 +157,24 @@ where
             }
 
             ControlMessage::Ack { .. } | ControlMessage::Nack { .. } => {}
+        }
+
+        Ok(())
+    }
+    pub fn liveliness_state(&self, participant_id: u64) -> LivelinessState {
+        self.liveliness.state(participant_id)
+    }
+    pub fn receive_control(&mut self) -> io::Result<()> {
+        let (bytes, _) = self.transport.receive()?;
+
+        let message = decode_network_message(&bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+        match message {
+            NetworkMessage::Control(control) => {
+                self.handle_control_message(control)?;
+            }
+            NetworkMessage::Data(_) => {}
         }
 
         Ok(())

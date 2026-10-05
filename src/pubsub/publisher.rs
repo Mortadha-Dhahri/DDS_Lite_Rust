@@ -161,7 +161,7 @@ where
                     }
                 }
             }
-            ControlMessage::Heartbeat { participant_id } => todo!(),
+            ControlMessage::Heartbeat { .. } => todo!(),
         }
 
         Ok(())

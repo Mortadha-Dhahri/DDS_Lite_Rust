@@ -4,8 +4,9 @@ use std::net::SocketAddr;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    ControlMessage, NetworkDiscovery, NetworkMessage, SequenceEvent, SequenceTracker, Topic,
-    Transport, UdpTransport, decode_network_message, deserialize_payload,
+    decode_network_message, deserialize_payload, ControlMessage, LivelinessTracker,
+    NetworkDiscovery, NetworkMessage, SequenceEvent, SequenceTracker, Topic, Transport,
+    UdpTransport,
 };
 
 pub struct Subscriber<T> {
@@ -13,6 +14,7 @@ pub struct Subscriber<T> {
     _discovery: NetworkDiscovery,
     transport: UdpTransport,
     sequence_tracker: SequenceTracker,
+    liveliness: LivelinessTracker,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -30,6 +32,7 @@ where
             _discovery: discovery,
             transport,
             sequence_tracker: SequenceTracker::new(),
+            liveliness: LivelinessTracker::new(std::time::Duration::from_secs(3)),
             _marker: std::marker::PhantomData,
         })
     }
@@ -46,7 +49,6 @@ where
 
                 NetworkMessage::Control(_) => {
                     println!("Ignoring control message from {}", sender);
-
                     continue;
                 }
             };
@@ -73,8 +75,7 @@ where
 
                 SequenceEvent::Gap { missing } => {
                     println!(
-                        "Gap detected at sequence {}. \
-                         Missing: {:?}",
+                        "Gap detected at sequence {}. Missing: {:?}",
                         sequence_number, missing
                     );
 
@@ -87,7 +88,6 @@ where
 
                 SequenceEvent::Duplicate => {
                     println!("Ignoring duplicate sequence: {}", sequence_number);
-
                     continue;
                 }
             }
@@ -100,6 +100,7 @@ where
             return Ok(data);
         }
     }
+
     fn send_nack(&self, destination: &SocketAddr, missing_sequences: Vec<u64>) -> io::Result<()> {
         if missing_sequences.is_empty() {
             return Ok(());
@@ -142,14 +143,55 @@ where
 
         Ok(())
     }
-    pub fn handle_control_message(&self, message: ControlMessage) -> io::Result<()> {
+
+    pub fn handle_control_message(&mut self, message: ControlMessage) -> io::Result<()> {
         match message {
             ControlMessage::Heartbeat { participant_id } => {
-                println!("Received heartbeat from participant {}.", participant_id);
+                self.liveliness.observe(participant_id);
+
+                println!(
+                    "Received heartbeat from participant {}.",
+                    participant_id
+                );
             }
+
             ControlMessage::Ack { .. } | ControlMessage::Nack { .. } => {}
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn heartbeat_marks_participant_alive() {
+        let topic = Topic::new("vehicle/state", "VehicleState");
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse::<SocketAddr>().unwrap(),
+            "127.0.0.1:6000".parse::<SocketAddr>().unwrap(),
+        )
+        .unwrap();
+
+        let transport =
+            UdpTransport::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();
+
+        let mut subscriber =
+            Subscriber::<Vec<u8>>::new(topic, discovery, transport).unwrap();
+
+        let heartbeat = ControlMessage::Heartbeat { participant_id: 42 };
+
+        subscriber
+            .handle_control_message(heartbeat)
+            .unwrap();
+
+        assert_eq!(
+            subscriber.liveliness.state(42),
+            crate::LivelinessState::Alive
+        );
     }
 }

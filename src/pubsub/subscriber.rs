@@ -4,9 +4,8 @@ use std::net::SocketAddr;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    decode_network_message, deserialize_payload, ControlMessage, LivelinessTracker,
-    NetworkDiscovery, NetworkMessage, SequenceEvent, SequenceTracker, Topic, Transport,
-    UdpTransport,
+    ControlMessage, LivelinessTracker, NetworkDiscovery, NetworkMessage, SequenceEvent,
+    SequenceTracker, Topic, Transport, UdpTransport, decode_network_message, deserialize_payload,
 };
 
 pub struct Subscriber<T> {
@@ -149,10 +148,7 @@ where
             ControlMessage::Heartbeat { participant_id } => {
                 self.liveliness.observe(participant_id);
 
-                println!(
-                    "Received heartbeat from participant {}.",
-                    participant_id
-                );
+                println!("Received heartbeat from participant {}.", participant_id);
             }
 
             ControlMessage::Ack { .. } | ControlMessage::Nack { .. } => {}
@@ -177,17 +173,13 @@ mod tests {
         )
         .unwrap();
 
-        let transport =
-            UdpTransport::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();
+        let transport = UdpTransport::bind("127.0.0.1:0".parse::<SocketAddr>().unwrap()).unwrap();
 
-        let mut subscriber =
-            Subscriber::<Vec<u8>>::new(topic, discovery, transport).unwrap();
+        let mut subscriber = Subscriber::<Vec<u8>>::new(topic, discovery, transport).unwrap();
 
         let heartbeat = ControlMessage::Heartbeat { participant_id: 42 };
 
-        subscriber
-            .handle_control_message(heartbeat)
-            .unwrap();
+        subscriber.handle_control_message(heartbeat).unwrap();
 
         assert_eq!(
             subscriber.liveliness.state(42),

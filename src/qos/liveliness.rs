@@ -31,6 +31,19 @@ impl LivelinessTracker {
             _ => LivelinessState::Expired,
         }
     }
+
+    pub fn expired_participants(&self) -> Vec<u64> {
+        self.participants
+            .iter()
+            .filter_map(|(participant_id, last_seen)| {
+                if last_seen.elapsed() >= self.timeout {
+                    Some(*participant_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -62,5 +75,20 @@ mod tests {
         std::thread::sleep(Duration::from_millis(20));
 
         assert_eq!(tracker.state(42), LivelinessState::Expired);
+    }
+
+    #[test]
+    fn expired_participants_returns_expired_ids() {
+        let mut tracker = LivelinessTracker::new(Duration::from_millis(10));
+
+        tracker.observe(42);
+        tracker.observe(43);
+
+        std::thread::sleep(Duration::from_millis(20));
+
+        let expired = tracker.expired_participants();
+
+        assert!(expired.contains(&42));
+        assert!(expired.contains(&43));
     }
 }

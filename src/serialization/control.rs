@@ -1,15 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ControlMessage {
     Nack {
         topic: String,
         missing_sequences: Vec<u64>,
     },
-
     Ack {
         topic: String,
         sequence_number: u64,
+    },
+    Heartbeat {
+        participant_id: u64,
     },
 }
 
@@ -70,6 +72,15 @@ mod tests {
 
         let encoded = encode_control_message(&message).unwrap();
 
+        let decoded = decode_control_message(&encoded).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+    #[test]
+    fn heartbeat_round_trip() {
+        let message = ControlMessage::Heartbeat { participant_id: 42 };
+
+        let encoded = encode_control_message(&message).unwrap();
         let decoded = decode_control_message(&encoded).unwrap();
 
         assert_eq!(decoded, message);

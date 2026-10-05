@@ -142,4 +142,14 @@ where
 
         Ok(())
     }
+    pub fn handle_control_message(&self, message: ControlMessage) -> io::Result<()> {
+        match message {
+            ControlMessage::Heartbeat { participant_id } => {
+                println!("Received heartbeat from participant {}.", participant_id);
+            }
+            ControlMessage::Ack { .. } | ControlMessage::Nack { .. } => {}
+        }
+
+        Ok(())
+    }
 }

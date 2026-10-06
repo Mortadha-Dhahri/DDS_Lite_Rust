@@ -1,5 +1,6 @@
 use std::io;
 use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 
 use crate::{
     ControlMessage, EndpointKind, NetworkDiscovery, NetworkMessage, Participant, Transport,
@@ -12,6 +13,8 @@ pub struct ParticipantRuntime {
     pub transport: UdpTransport,
     topic: String,
     kind: EndpointKind,
+    last_heartbeat: Instant,
+    heartbeat_interval: Duration,
 }
 
 impl ParticipantRuntime {
@@ -42,6 +45,8 @@ impl ParticipantRuntime {
             transport,
             topic: topic.to_string(),
             kind,
+            last_heartbeat: Instant::now(),
+            heartbeat_interval: Duration::from_secs(1),
         })
     }
 
@@ -68,6 +73,18 @@ impl ParticipantRuntime {
             }
 
             self.transport.send(&bytes, endpoint.address)?;
+        }
+
+        Ok(())
+    }
+    pub fn with_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.heartbeat_interval = interval;
+        self
+    }
+    pub fn tick(&mut self) -> io::Result<()> {
+        if self.last_heartbeat.elapsed() >= self.heartbeat_interval {
+            self.send_heartbeat()?;
+            self.last_heartbeat = Instant::now();
         }
 
         Ok(())

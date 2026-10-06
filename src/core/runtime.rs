@@ -97,4 +97,7 @@ impl ParticipantRuntime {
         self.reliability_check_interval = interval;
         self
     }
+    pub fn poll(&mut self) -> io::Result<()> {
+        self.tick()
+    }
 }

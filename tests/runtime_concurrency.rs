@@ -100,7 +100,7 @@ fn runtime_processes_data_and_heartbeat_without_blocking() -> Result<(), Box<dyn
     let mut received_heartbeat = false;
 
     while Instant::now() < deadline {
-        heartbeat_runtime.poll().unwrap();
+        heartbeat_runtime.tick().unwrap();
 
         if subscriber.try_receive()?.is_some() {
             received_data = true;

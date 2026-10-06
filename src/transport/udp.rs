@@ -17,6 +17,24 @@ impl UdpTransport {
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.socket.local_addr()
     }
+
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.socket.set_nonblocking(nonblocking)
+    }
+
+    pub fn try_receive(&self) -> io::Result<Option<(Vec<u8>, SocketAddr)>> {
+        let mut buffer = vec![0u8; 65_535];
+
+        match self.socket.recv_from(&mut buffer) {
+            Ok((size, sender)) => {
+                buffer.truncate(size);
+
+                Ok(Some((buffer, sender)))
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 impl Transport for UdpTransport {
@@ -34,3 +52,16 @@ impl Transport for UdpTransport {
         Ok((buffer, sender))
     }
 }
+
+/*
+    receive()
+        blocking
+        existing behavior
+        nothing breaks
+
+    try_receive()
+        non-blocking
+        returns Some(message)
+        returns None when nothing is available
+
+*/

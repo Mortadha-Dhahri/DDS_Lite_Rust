@@ -48,60 +48,16 @@ where
             let network_message = decode_network_message(&bytes)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-            let message = match network_message {
-                NetworkMessage::Data(message) => message,
-
-                NetworkMessage::Control(_) => {
-                    println!("Ignoring control message from {}", sender);
-                    continue;
+            match network_message {
+                NetworkMessage::Data(message) => {
+                    if let Some(data) = self.handle_data_message(message, sender)? {
+                        return Ok(data);
+                    }
                 }
-            };
-
-            if message.topic != self.topic.name() {
-                println!(
-                    "Ignoring message for topic '{}' from {}",
-                    message.topic, sender
-                );
-
-                continue;
-            }
-
-            let sequence_number = message.sequence_number;
-
-            match self.sequence_tracker.observe(sequence_number) {
-                SequenceEvent::First => {
-                    println!("Received first sequence: {}", sequence_number);
-                }
-
-                SequenceEvent::Contiguous => {
-                    println!("Received sequence: {}", sequence_number);
-                }
-
-                SequenceEvent::Gap { missing } => {
-                    println!(
-                        "Gap detected at sequence {}. Missing: {:?}",
-                        sequence_number, missing
-                    );
-
-                    self.send_nack(&sender, missing)?;
-                }
-
-                SequenceEvent::Late => {
-                    println!("Received late sequence: {}", sequence_number);
-                }
-
-                SequenceEvent::Duplicate => {
-                    println!("Ignoring duplicate sequence: {}", sequence_number);
-                    continue;
+                NetworkMessage::Control(control) => {
+                    self.handle_control_message(control)?;
                 }
             }
-
-            let data = deserialize_payload::<T>(&message.payload)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-
-            self.send_ack(&sender, message.sequence_number)?;
-
-            return Ok(data);
         }
     }
 
@@ -170,14 +126,57 @@ where
         let message = decode_network_message(&bytes)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-        match message {
-            NetworkMessage::Control(control) => {
-                self.handle_control_message(control)?;
-            }
-            NetworkMessage::Data(_) => {}
+        if let NetworkMessage::Control(control) = message {
+            self.handle_control_message(control)?;
         }
 
         Ok(())
+    }
+
+    fn handle_data_message(
+        &mut self,
+        message: crate::WireMessage,
+        sender: SocketAddr,
+    ) -> io::Result<Option<T>> {
+        if message.topic != self.topic.name() {
+            println!(
+                "Ignoring message for topic '{}' from {}",
+                message.topic, sender
+            );
+            return Ok(None);
+        }
+
+        let sequence_number = message.sequence_number;
+
+        match self.sequence_tracker.observe(sequence_number) {
+            SequenceEvent::First => {
+                println!("Received first sequence: {}", sequence_number);
+            }
+            SequenceEvent::Contiguous => {
+                println!("Received sequence: {}", sequence_number);
+            }
+            SequenceEvent::Gap { missing } => {
+                println!(
+                    "Gap detected at sequence {}. Missing: {:?}",
+                    sequence_number, missing
+                );
+                self.send_nack(&sender, missing)?;
+            }
+            SequenceEvent::Late => {
+                println!("Received late sequence: {}", sequence_number);
+            }
+            SequenceEvent::Duplicate => {
+                println!("Ignoring duplicate sequence: {}", sequence_number);
+                return Ok(None);
+            }
+        }
+
+        let data = deserialize_payload::<T>(&message.payload)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+        self.send_ack(&sender, sequence_number)?;
+
+        Ok(Some(data))
     }
 }
 

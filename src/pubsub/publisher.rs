@@ -285,7 +285,29 @@ where
             None => Ok(false),
         }
     }
+    pub fn reliability_tick(&mut self, timeout: Duration) -> io::Result<()> {
+        self.process_reliability(timeout)
+    }
 }
+
+/*
+
+commit: Connect the reliability timer
+
+Publisher
+    │
+    └── reliability_tick()
+            │
+            └── process_reliability()
+                    │
+                    └── retransmit_expired_acknowledgements()
+
+ParticipantRuntime
+    │
+    └── tick()
+            │
+            └── heartbeat scheduling
+*/
 
 #[cfg(test)]
 mod tests {

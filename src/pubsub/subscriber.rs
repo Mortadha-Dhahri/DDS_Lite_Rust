@@ -178,6 +178,26 @@ where
 
         Ok(Some(data))
     }
+    pub fn try_receive(&mut self) -> io::Result<Option<T>> {
+        match self.transport.try_receive()? {
+            Some((bytes, sender)) => {
+                let network_message = decode_network_message(&bytes)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+                match network_message {
+                    NetworkMessage::Data(message) => self.handle_data_message(message, sender),
+                    NetworkMessage::Control(control) => {
+                        self.handle_control_message(control)?;
+                        Ok(None)
+                    }
+                }
+            }
+            None => Ok(None),
+        }
+    }
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.transport.set_nonblocking(nonblocking)
+    }
 }
 
 #[cfg(test)]

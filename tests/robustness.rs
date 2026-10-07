@@ -10,8 +10,7 @@ fn malformed_packet_does_not_stop_receiver() -> Result<(), Box<dyn std::error::E
     let discovery_server_address = "127.0.0.1:6500".parse().unwrap();
 
     std::thread::spawn(move || {
-        let mut server =
-            dds_lite_rust::DiscoveryServer::bind(discovery_server_address).unwrap();
+        let mut server = dds_lite_rust::DiscoveryServer::bind(discovery_server_address).unwrap();
 
         server.run().unwrap();
     });

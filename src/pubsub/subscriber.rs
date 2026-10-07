@@ -152,6 +152,14 @@ where
             return Ok(None);
         }
 
+        if message.type_name != self.topic.type_name() {
+            println!(
+                "Ignoring message with unsupported type '{}' for topic '{}' from {}",
+                message.type_name, message.topic, sender
+            );
+            return Ok(None);
+        }
+
         let sequence_number = message.sequence_number;
 
         match self.sequence_tracker.observe(sequence_number) {

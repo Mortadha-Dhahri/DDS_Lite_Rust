@@ -198,6 +198,9 @@ where
     pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         self.transport.set_nonblocking(nonblocking)
     }
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.transport.local_addr()
+    }
 }
 
 #[cfg(test)]

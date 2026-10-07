@@ -45,8 +45,14 @@ where
         loop {
             let (bytes, sender) = self.transport.receive()?;
 
-            let network_message = decode_network_message(&bytes)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            let network_message = match Self::decode_message(&bytes) {
+                Ok(message) => message,
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                    println!("Ignoring malformed packet from {}: {}", sender, error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
 
             match network_message {
                 NetworkMessage::Data(message) => {
@@ -181,8 +187,14 @@ where
     pub fn try_receive(&mut self) -> io::Result<Option<T>> {
         match self.transport.try_receive()? {
             Some((bytes, sender)) => {
-                let network_message = decode_network_message(&bytes)
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                let network_message = match Self::decode_message(&bytes) {
+                    Ok(message) => message,
+                    Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+                        println!("Ignoring malformed packet from {}: {}", sender, error);
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
 
                 match network_message {
                     NetworkMessage::Data(message) => self.handle_data_message(message, sender),
@@ -200,6 +212,10 @@ where
     }
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.transport.local_addr()
+    }
+    fn decode_message(bytes: &[u8]) -> io::Result<NetworkMessage> {
+        decode_network_message(bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 }
 

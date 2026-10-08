@@ -7,7 +7,7 @@ use dds_lite_rust::{
 };
 
 #[test]
-fn subscriber_detects_publisher_liveliness_expiration() {
+fn subscriber_detects_publisher_liveliness_expiration() -> Result<(), Box<dyn std::error::Error>> {
     let discovery_server_address = "127.0.0.1:6300".parse().unwrap();
 
     thread::spawn(move || {
@@ -88,4 +88,27 @@ fn subscriber_detects_publisher_liveliness_expiration() {
         subscriber.liveliness_state(publisher_participant.id()),
         dds_lite_rust::LivelinessState::Expired
     );
+    // Simulate the publisher restarting.
+    // The old transport has disappeared, and a new transport
+    // comes back using the same participant ID and address.
+    drop(publisher_transport);
+
+    let restarted_publisher_transport = UdpTransport::bind(publisher_address)?;
+
+    let heartbeat = NetworkMessage::Control(ControlMessage::Heartbeat {
+        participant_id: publisher_participant.id(),
+    });
+
+    let heartbeat_bytes = encode_network_message(&heartbeat)?;
+
+    restarted_publisher_transport.send(&heartbeat_bytes, subscriber_participant.address())?;
+
+    subscriber.receive_control()?;
+
+    assert_eq!(
+        subscriber.liveliness_state(publisher_participant.id()),
+        dds_lite_rust::LivelinessState::Alive
+    );
+
+    Ok(())
 }

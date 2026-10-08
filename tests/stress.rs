@@ -14,7 +14,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-
 fn run_relay_drops_range(
     relay: UdpSocket,
     publisher_address: SocketAddr,
@@ -44,14 +43,9 @@ fn run_relay_drops_range(
         };
 
         match (&message, sender) {
-            (NetworkMessage::Data(data), sender)
-                if sender == publisher_address =>
-            {
+            (NetworkMessage::Data(data), sender) if sender == publisher_address => {
                 if (21..=23).contains(&data.sequence_number) && !dropped_sequences {
-                    println!(
-                        "Relay: dropping sequence {}",
-                        data.sequence_number
-                    );
+                    println!("Relay: dropping sequence {}", data.sequence_number);
 
                     if data.sequence_number == 23 {
                         dropped_sequences = true;
@@ -60,17 +54,11 @@ fn run_relay_drops_range(
                     continue;
                 }
 
-                relay
-                    .send_to(&buffer[..size], subscriber_address)
-                    .unwrap();
+                relay.send_to(&buffer[..size], subscriber_address).unwrap();
             }
 
-            (NetworkMessage::Control(_), sender)
-                if sender == subscriber_address =>
-            {
-                relay
-                    .send_to(&buffer[..size], publisher_address)
-                    .unwrap();
+            (NetworkMessage::Control(_), sender) if sender == subscriber_address => {
+                relay.send_to(&buffer[..size], publisher_address).unwrap();
             }
 
             _ => {}
@@ -828,12 +816,10 @@ fn reliable_recovers_from_dropped_packet() {
     );
 }
 
-
 #[test]
 fn reliable_recovers_from_multiple_dropped_packets() {
     std::thread::spawn(|| {
-        let mut server =
-            DiscoveryServer::bind("127.0.0.1:6804".parse().unwrap()).unwrap();
+        let mut server = DiscoveryServer::bind("127.0.0.1:6804".parse().unwrap()).unwrap();
 
         server.run().unwrap();
     });
@@ -855,12 +841,7 @@ fn reliable_recovers_from_multiple_dropped_packets() {
     let relay_stop = Arc::clone(&stop);
 
     let relay_thread = std::thread::spawn(move || {
-        run_relay_drops_range(
-            relay,
-            publisher_address,
-            subscriber_address,
-            relay_stop,
-        );
+        run_relay_drops_range(relay, publisher_address, subscriber_address, relay_stop);
     });
 
     let publisher_discovery = NetworkDiscovery::bind(
@@ -924,14 +905,13 @@ fn reliable_recovers_from_multiple_dropped_packets() {
 
     let publisher_qos = QosPolicy::new(100, Reliability::Reliable);
 
-    let mut publisher =
-        Publisher::<TestMessage>::new(
-            topic.clone(),
-            publisher_discovery,
-            publisher_transport,
-            publisher_qos,
-        )
-        .unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        publisher_discovery,
+        publisher_transport,
+        publisher_qos,
+    )
+    .unwrap();
 
     publisher.set_nonblocking(true).unwrap();
 

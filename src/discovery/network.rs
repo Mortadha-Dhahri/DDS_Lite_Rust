@@ -1,5 +1,6 @@
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
+use std::time::Duration;
 
 use crate::core::Participant;
 
@@ -13,6 +14,8 @@ pub struct NetworkDiscovery {
 impl NetworkDiscovery {
     pub fn bind(local_address: SocketAddr, server_address: SocketAddr) -> io::Result<Self> {
         let socket = UdpSocket::bind(local_address)?;
+
+        socket.set_read_timeout(Some(Duration::from_millis(500)))?;
 
         Ok(Self {
             socket,

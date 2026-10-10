@@ -4,9 +4,10 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use crate::{
-    ControlMessage, DiscoveryServer, EndpointKind, History, NetworkDiscovery, NetworkMessage,
-    Participant, QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage,
-    decode_network_message, deserialize_payload, encode_network_message, serialize_payload,
+    ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
+    NetworkMessage, Participant, QosPolicy, Reliability, Topic, Transport, UdpTransport,
+    WireMessage, decode_network_message, deserialize_payload, encode_network_message,
+    serialize_payload,
 };
 
 use std::collections::HashMap;
@@ -19,6 +20,7 @@ pub struct Publisher<T> {
     history: History<T>,
     next_sequence_number: u64,
     pending_acks: HashMap<SocketAddr, HashMap<u64, Instant>>,
+    subscribers: Option<Vec<crate::DiscoveredEndpoint>>,
     _marker: PhantomData<T>,
 }
 
@@ -40,6 +42,7 @@ where
             history: History::new(qos.history_depth()),
             next_sequence_number: 1,
             pending_acks: HashMap::new(),
+            subscribers: None,
             _marker: std::marker::PhantomData,
         })
     }
@@ -50,9 +53,11 @@ where
 
         self.history.push(sequence_number, data.clone());
 
-        let subscribers = self
-            .discovery
-            .lookup(self.topic.name(), EndpointKind::Subscriber)?;
+        if self.subscribers.is_none() {
+            self.refresh_subscribers()?;
+        }
+
+        let subscribers = self.subscribers.as_ref().unwrap();
 
         let payload = serialize_payload(data)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -281,6 +286,15 @@ where
     }
     pub fn reliability_tick(&mut self, timeout: Duration) -> io::Result<()> {
         self.process_reliability(timeout)
+    }
+    pub fn refresh_subscribers(&mut self) -> io::Result<()> {
+        let subscribers = self
+            .discovery
+            .lookup(self.topic.name(), EndpointKind::Subscriber)?;
+
+        self.subscribers = Some(subscribers);
+
+        Ok(())
     }
 }
 

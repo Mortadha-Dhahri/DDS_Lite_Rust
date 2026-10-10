@@ -7,7 +7,7 @@ pub mod transport;
 
 pub use core::{Participant, ParticipantRuntime, Topic};
 
-pub use discovery::{DiscoveryServer, EndpointKind, NetworkDiscovery};
+pub use discovery::{DiscoveredEndpoint, DiscoveryServer, EndpointKind, NetworkDiscovery};
 
 pub use pubsub::{Publisher, Subscriber};
 pub use qos::{

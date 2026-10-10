@@ -102,11 +102,6 @@ where
 
         self.transport.send(&bytes, *destination)?;
 
-        println!(
-            "Sent ACK for sequence {} to {}.",
-            sequence_number, destination
-        );
-
         Ok(())
     }
 
@@ -163,22 +158,12 @@ where
         let sequence_number = message.sequence_number;
 
         match self.sequence_tracker.observe(sequence_number) {
-            SequenceEvent::First => {
-                println!("Received first sequence: {}", sequence_number);
-            }
-            SequenceEvent::Contiguous => {
-                println!("Received sequence: {}", sequence_number);
-            }
+            SequenceEvent::First => {}
+            SequenceEvent::Contiguous => {}
             SequenceEvent::Gap { missing } => {
-                println!(
-                    "Gap detected at sequence {}. Missing: {:?}",
-                    sequence_number, missing
-                );
                 self.send_nack(&sender, missing)?;
             }
-            SequenceEvent::Late => {
-                println!("Received late sequence: {}", sequence_number);
-            }
+            SequenceEvent::Late => {}
             SequenceEvent::Duplicate => {
                 println!("Ignoring duplicate sequence: {}", sequence_number);
                 return Ok(None);
@@ -188,7 +173,9 @@ where
         let data = deserialize_payload::<T>(&message.payload)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-        self.send_ack(&sender, sequence_number)?;
+        if self.qos.reliability() == crate::Reliability::Reliable {
+            self.send_ack(&sender, sequence_number)?;
+        }
 
         Ok(Some(data))
     }

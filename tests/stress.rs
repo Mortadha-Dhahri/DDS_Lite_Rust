@@ -515,12 +515,10 @@ fn reliable_burst_recovers_from_dropped_packet() {
     let publisher_address: SocketAddr = "127.0.0.1:7731".parse().unwrap();
     let relay_address: SocketAddr = "127.0.0.1:7732".parse().unwrap();
     let subscriber_address: SocketAddr = "127.0.0.1:7733".parse().unwrap();
-
-    let discovery_server_address: SocketAddr = "127.0.0.1:6803".parse().unwrap();
+    let mut server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let discovery_server_address = server.local_addr().unwrap();
 
     std::thread::spawn(move || {
-        let mut server = DiscoveryServer::bind(discovery_server_address).unwrap();
-
         server.run().unwrap();
     });
 
@@ -669,19 +667,29 @@ fn reliable_burst_recovers_from_dropped_packet() {
 }
 #[test]
 fn reliable_recovers_from_dropped_packet() {
-    std::thread::spawn(|| {
-        let mut server = DiscoveryServer::bind("127.0.0.1:6803".parse().unwrap()).unwrap();
+    let mut server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let discovery_server_address = server.local_addr().unwrap();
 
+    std::thread::spawn(move || {
         server.run().unwrap();
     });
 
     std::thread::sleep(Duration::from_millis(100));
 
-    let publisher_address = "127.0.0.1:7731".parse().unwrap();
-    let relay_address = "127.0.0.1:7732".parse().unwrap();
-    let subscriber_address = "127.0.0.1:7733".parse().unwrap();
+    let publisher_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let subscriber_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let relay_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let publisher_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let publisher_address = publisher_socket.local_addr().unwrap();
+    drop(publisher_socket);
+
+    let subscriber_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let subscriber_address = subscriber_socket.local_addr().unwrap();
+    drop(subscriber_socket);
 
     let relay = UdpSocket::bind(relay_address).unwrap();
+    let relay_address = relay.local_addr().unwrap();
+
     relay
         .set_read_timeout(Some(Duration::from_millis(100)))
         .unwrap();
@@ -694,17 +702,11 @@ fn reliable_recovers_from_dropped_packet() {
         run_relay(relay, publisher_address, subscriber_address, relay_stop);
     });
 
-    let publisher_discovery = NetworkDiscovery::bind(
-        "127.0.0.1:0".parse().unwrap(),
-        "127.0.0.1:6803".parse().unwrap(),
-    )
-    .unwrap();
+    let publisher_discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address).unwrap();
 
-    let subscriber_discovery = NetworkDiscovery::bind(
-        "127.0.0.1:0".parse().unwrap(),
-        "127.0.0.1:6803".parse().unwrap(),
-    )
-    .unwrap();
+    let subscriber_discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address).unwrap();
 
     let publisher_participant = Participant::new(1, publisher_address);
 
@@ -736,7 +738,6 @@ fn reliable_recovers_from_dropped_packet() {
             EndpointKind::Subscriber,
         )
         .unwrap();
-
     let subscriber_transport = UdpTransport::bind(subscriber_address).unwrap();
 
     let subscriber_qos = QosPolicy::new(100, Reliability::Reliable);
@@ -752,7 +753,6 @@ fn reliable_recovers_from_dropped_packet() {
     subscriber.set_nonblocking(true).unwrap();
 
     let publisher_transport = UdpTransport::bind(publisher_address).unwrap();
-
     let publisher_qos = QosPolicy::new(100, Reliability::Reliable);
 
     let mut publisher = Publisher::<TestMessage>::new(

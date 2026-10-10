@@ -69,12 +69,6 @@ where
         let bytes = encode_network_message(&network_message)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
-        println!(
-            "Publishing sequence {} to {} subscriber(s).",
-            sequence_number,
-            subscribers.len()
-        );
-
         for subscriber in subscribers {
             self.transport.send(&bytes, subscriber.address)?;
 

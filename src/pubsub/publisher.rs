@@ -1250,4 +1250,117 @@ mod tests {
 
         assert_eq!(publisher.pending_ack_count(), 0);
     }
+    #[test]
+    fn only_subscriber_with_pending_ack_receives_retransmission() {
+        let subscriber_a = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let subscriber_b = UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        for subscriber in [&subscriber_a, &subscriber_b] {
+            subscriber
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+        }
+
+        let address_a = subscriber_a.local_addr().unwrap();
+        let address_b = subscriber_b.local_addr().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/multi-subscriber-retry", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        // Sequence 1 is available for retransmission.
+        publisher.history.push(1, TestMessage { value: 42 });
+
+        let expired_at = Instant::now() - Duration::from_secs(1);
+
+        // Both subscribers initially have a pending ACK for sequence 1.
+        for address in [address_a, address_b] {
+            publisher.pending_acks.entry(address).or_default().insert(
+                1,
+                PendingAck {
+                    sent_at: expired_at,
+                    retransmission_attempts: 0,
+                },
+            );
+        }
+
+        assert_eq!(publisher.pending_ack_count(), 2);
+
+        // Subscriber A acknowledges sequence 1.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 1,
+                },
+                address_a,
+            )
+            .unwrap();
+
+        // Only subscriber B should still have a pending ACK.
+        assert_eq!(publisher.pending_ack_count(), 1);
+        assert!(!publisher.pending_acks.contains_key(&address_a));
+        assert!(publisher.pending_acks.contains_key(&address_b));
+
+        // Process expired ACKs. Only B should receive a retransmission.
+        publisher
+            .retransmit_expired_acknowledgements(Duration::ZERO)
+            .unwrap();
+
+        let mut buffer = [0u8; 65_535];
+
+        // Subscriber B must receive sequence 1 again.
+        let (size, sender) = subscriber_b
+            .recv_from(&mut buffer)
+            .expect("subscriber B should receive the retransmission");
+
+        assert_eq!(sender, publisher.local_addr().unwrap());
+
+        match decode_network_message(&buffer[..size]).unwrap() {
+            NetworkMessage::Data(message) => {
+                assert_eq!(message.sequence_number, 1);
+                assert_eq!(message.topic, "test/multi-subscriber-retry");
+
+                let decoded: TestMessage = deserialize_payload(&message.payload).unwrap();
+                assert_eq!(decoded, TestMessage { value: 42 });
+            }
+            NetworkMessage::Control(_) => {
+                panic!("Expected a retransmitted data message");
+            }
+        }
+
+        // Subscriber A must not receive a retransmission.
+        let result = subscriber_a.recv_from(&mut buffer);
+
+        assert!(
+            matches!(
+                result,
+                Err(ref error)
+                    if error.kind() == io::ErrorKind::WouldBlock
+                        || error.kind() == io::ErrorKind::TimedOut
+            ),
+            "subscriber A must not receive a retransmission after acknowledging sequence 1"
+        );
+
+        // B's retry is tracked; A's completed delivery stays cleared.
+        let pending_b = publisher
+            .pending_acks
+            .get(&address_b)
+            .and_then(|pending| pending.get(&1))
+            .expect("subscriber B should still have a pending ACK");
+
+        assert_eq!(pending_b.retransmission_attempts, 1);
+        assert_eq!(publisher.pending_ack_count(), 1);
+        assert!(!publisher.pending_acks.contains_key(&address_a));
+    }
 }

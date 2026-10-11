@@ -20,7 +20,9 @@ pub struct Publisher<T> {
     history: History<T>,
     next_sequence_number: u64,
     pending_acks: HashMap<SocketAddr, HashMap<u64, Instant>>,
-    subscribers: Option<Vec<crate::DiscoveredEndpoint>>,
+    subscribers: Option<Vec<DiscoveredEndpoint>>,
+    last_subscriber_refresh: Option<Instant>,
+    subscriber_refresh_interval: Duration,
     _marker: PhantomData<T>,
 }
 
@@ -43,7 +45,9 @@ where
             next_sequence_number: 1,
             pending_acks: HashMap::new(),
             subscribers: None,
-            _marker: std::marker::PhantomData,
+            last_subscriber_refresh: None,
+            subscriber_refresh_interval: Duration::from_secs(1),
+            _marker: PhantomData,
         })
     }
 
@@ -54,7 +58,18 @@ where
         self.history.push(sequence_number, data.clone());
 
         if self.subscribers.is_none() {
+            // Initial discovery is required before the first publication.
             self.refresh_subscribers()?;
+        } else {
+            let refresh_due = self
+                .last_subscriber_refresh
+                .map(|last| last.elapsed() >= self.subscriber_refresh_interval)
+                .unwrap_or(true);
+
+            if refresh_due {
+                // Keep using the existing cache if this refresh fails.
+                let _ = self.refresh_subscribers();
+            }
         }
 
         let subscribers = self.subscribers.as_ref().unwrap();
@@ -293,8 +308,12 @@ where
             .lookup(self.topic.name(), EndpointKind::Subscriber)?;
 
         self.subscribers = Some(subscribers);
+        self.last_subscriber_refresh = Some(Instant::now());
 
         Ok(())
+    }
+    pub fn set_subscriber_refresh_interval(&mut self, interval: Duration) {
+        self.subscriber_refresh_interval = interval;
     }
 }
 

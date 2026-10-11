@@ -676,8 +676,6 @@ fn reliable_recovers_from_dropped_packet() {
 
     std::thread::sleep(Duration::from_millis(100));
 
-    let publisher_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let subscriber_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let relay_address: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let publisher_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     let publisher_address = publisher_socket.local_addr().unwrap();

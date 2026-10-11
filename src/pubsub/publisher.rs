@@ -668,4 +668,71 @@ mod tests {
             "a duplicate ACK must not recreate pending state"
         );
     }
+    #[test]
+    fn nack_for_missing_history_entry_does_not_block_available_retransmission() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        // History depth is 1: adding sequence 2 should evict sequence 1.
+        let topic = Topic::new("test/nack-history", "TestMessage");
+        let qos = QosPolicy::new(1, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        publisher.history.push(1, TestMessage { value: 10 });
+        publisher.history.push(2, TestMessage { value: 20 });
+
+        // Confirm the intended history state before testing the NACK.
+        assert!(
+            publisher.history.find(1).is_none(),
+            "sequence 1 should no longer be in history"
+        );
+        assert!(
+            publisher.history.find(2).is_some(),
+            "sequence 2 should remain in history"
+        );
+
+        // Request both sequences: one unavailable and one available.
+        let nack = ControlMessage::Nack {
+            topic: topic.name().to_string(),
+            missing_sequences: vec![1, 2],
+        };
+
+        publisher
+            .handle_control_message(nack, receiver_address)
+            .expect("handling an unavailable sequence should not fail");
+
+        // Sequence 1 cannot be retransmitted, but sequence 2 should be.
+        let mut buffer = [0u8; 65_535];
+        let (size, sender) = receiver
+            .recv_from(&mut buffer)
+            .expect("available sequence 2 should still be retransmitted");
+
+        assert_eq!(sender, publisher.local_addr().unwrap());
+
+        match decode_network_message(&buffer[..size]).unwrap() {
+            NetworkMessage::Data(message) => {
+                assert_eq!(message.sequence_number, 2);
+
+                let decoded: TestMessage = deserialize_payload(&message.payload).unwrap();
+                assert_eq!(decoded, TestMessage { value: 20 });
+            }
+            NetworkMessage::Control(_) => {
+                panic!("Expected a retransmitted data message");
+            }
+        }
+    }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
@@ -10,7 +11,13 @@ use crate::{
     serialize_payload,
 };
 
-use std::collections::HashMap;
+const MAX_RETRANSMISSIONS: u8 = 3;
+
+#[derive(Debug, Clone, Copy)]
+struct PendingAck {
+    sent_at: Instant,
+    retransmission_attempts: u8,
+}
 
 pub struct Publisher<T> {
     topic: Topic,
@@ -19,10 +26,10 @@ pub struct Publisher<T> {
     qos: QosPolicy,
     history: History<T>,
     next_sequence_number: u64,
-    pending_acks: HashMap<SocketAddr, HashMap<u64, Instant>>,
-    subscribers: Option<Vec<DiscoveredEndpoint>>,
+    pending_acks: HashMap<SocketAddr, HashMap<u64, PendingAck>>,
     last_subscriber_refresh: Option<Instant>,
     subscriber_refresh_interval: Duration,
+    subscribers: Option<Vec<DiscoveredEndpoint>>,
     _marker: PhantomData<T>,
 }
 
@@ -96,7 +103,13 @@ where
                 self.pending_acks
                     .entry(subscriber.address)
                     .or_default()
-                    .insert(sequence_number, Instant::now());
+                    .insert(
+                        sequence_number,
+                        PendingAck {
+                            sent_at: Instant::now(),
+                            retransmission_attempts: 0,
+                        },
+                    );
             }
         }
 
@@ -218,22 +231,19 @@ where
             .map(|pending| pending.len())
             .sum()
     }
-
     pub fn expired_acknowledgements(&self, timeout: Duration) -> Vec<(SocketAddr, u64)> {
         let now = Instant::now();
 
         self.pending_acks
             .iter()
             .flat_map(|(subscriber, pending)| {
-                pending
-                    .iter()
-                    .filter_map(move |(sequence_number, sent_at)| {
-                        if now.duration_since(*sent_at) >= timeout {
-                            Some((*subscriber, *sequence_number))
-                        } else {
-                            None
-                        }
-                    })
+                pending.iter().filter_map(move |(sequence_number, ack)| {
+                    if now.duration_since(ack.sent_at) >= timeout {
+                        Some((*subscriber, *sequence_number))
+                    } else {
+                        None
+                    }
+                })
             })
             .collect()
     }
@@ -241,7 +251,38 @@ where
         let expired = self.expired_acknowledgements(timeout);
 
         for (subscriber, sequence_number) in expired {
+            let attempts = self
+                .pending_acks
+                .get(&subscriber)
+                .and_then(|pending| pending.get(&sequence_number))
+                .map(|ack| ack.retransmission_attempts);
+
+            let Some(attempts) = attempts else {
+                continue;
+            };
+
+            if attempts >= MAX_RETRANSMISSIONS {
+                if let Some(pending) = self.pending_acks.get_mut(&subscriber) {
+                    pending.remove(&sequence_number);
+
+                    if pending.is_empty() {
+                        self.pending_acks.remove(&subscriber);
+                    }
+                }
+
+                continue;
+            }
+
             self.retransmit(sequence_number, subscriber)?;
+
+            if let Some(ack) = self
+                .pending_acks
+                .get_mut(&subscriber)
+                .and_then(|pending| pending.get_mut(&sequence_number))
+            {
+                ack.retransmission_attempts += 1;
+                ack.sent_at = Instant::now();
+            }
         }
 
         Ok(())
@@ -396,7 +437,13 @@ mod tests {
             .pending_acks
             .entry(receiver_address)
             .or_default()
-            .insert(1, Instant::now() - Duration::from_secs(1));
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now() - Duration::from_secs(1),
+                    retransmission_attempts: 0,
+                },
+            );
 
         println!("pending ACK populated");
 
@@ -613,7 +660,13 @@ mod tests {
             .pending_acks
             .entry(subscriber_address)
             .or_default()
-            .insert(2, Instant::now());
+            .insert(
+                2,
+                PendingAck {
+                    sent_at: Instant::now(),
+                    retransmission_attempts: 0,
+                },
+            );
 
         assert_eq!(publisher.pending_ack_count(), 1);
 
@@ -734,5 +787,103 @@ mod tests {
                 panic!("Expected a retransmitted data message");
             }
         }
+    }
+    #[test]
+    fn retransmission_stops_after_maximum_attempts() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/retry-limit", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+
+        publisher.history.push(1, TestMessage { value: 42 });
+
+        publisher
+            .pending_acks
+            .entry(receiver_address)
+            .or_default()
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now() - Duration::from_secs(1),
+                    retransmission_attempts: 0,
+                },
+            );
+
+        assert_eq!(publisher.pending_ack_count(), 1);
+
+        // Each call should retransmit the message while attempts remain.
+        for attempt in 1..=MAX_RETRANSMISSIONS {
+            publisher
+                .retransmit_expired_acknowledgements(Duration::ZERO)
+                .unwrap();
+
+            let mut buffer = [0u8; 65_535];
+
+            let (size, _) = receiver
+                .recv_from(&mut buffer)
+                .expect("expected a retransmission");
+
+            match decode_network_message(&buffer[..size]).unwrap() {
+                NetworkMessage::Data(message) => {
+                    assert_eq!(message.sequence_number, 1);
+                }
+                NetworkMessage::Control(_) => {
+                    panic!("Expected a retransmitted data message");
+                }
+            }
+
+            let pending = publisher
+                .pending_acks
+                .get(&receiver_address)
+                .and_then(|entries| entries.get(&1))
+                .expect("pending ACK should remain until retries are exhausted");
+
+            assert_eq!(
+                pending.retransmission_attempts, attempt,
+                "unexpected retransmission attempt count"
+            );
+        }
+
+        // The next expired check must remove the exhausted entry without sending.
+        publisher
+            .retransmit_expired_acknowledgements(Duration::ZERO)
+            .unwrap();
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            0,
+            "exhausted pending ACK should be removed"
+        );
+
+        // Verify that no fourth retransmission was sent.
+        let mut buffer = [0u8; 65_535];
+
+        let result = receiver.recv_from(&mut buffer);
+
+        assert!(
+            matches!(
+                result,
+                Err(ref error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut
+            ),
+            "publisher sent an unexpected retransmission after reaching the limit"
+        );
     }
 }

@@ -588,4 +588,84 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn late_and_duplicate_acknowledgements_preserve_pending_state() {
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/ack", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        let subscriber = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let subscriber_address = subscriber.local_addr().unwrap();
+
+        // Simulate a pending ACK for sequence 2.
+        publisher
+            .pending_acks
+            .entry(subscriber_address)
+            .or_default()
+            .insert(2, Instant::now());
+
+        assert_eq!(publisher.pending_ack_count(), 1);
+
+        // A late ACK for sequence 1 must not remove sequence 2.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 1,
+                },
+                subscriber_address,
+            )
+            .unwrap();
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            1,
+            "a late ACK must not remove an unrelated pending acknowledgement"
+        );
+
+        // The correct ACK clears sequence 2.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 2,
+                },
+                subscriber_address,
+            )
+            .unwrap();
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            0,
+            "the matching ACK should clear the pending acknowledgement"
+        );
+
+        // Receiving the same ACK again must be harmless.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 2,
+                },
+                subscriber_address,
+            )
+            .unwrap();
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            0,
+            "a duplicate ACK must not recreate pending state"
+        );
+    }
 }

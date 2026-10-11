@@ -39,6 +39,7 @@ impl DiscoveryServer {
                 let participant = Participant::new(participant_id, address);
 
                 self.discovery.register_participant(participant);
+                self.liveliness.observe(participant_id);
 
                 DiscoveryResponse::Registered
             }

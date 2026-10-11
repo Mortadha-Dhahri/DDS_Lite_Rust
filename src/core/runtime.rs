@@ -87,7 +87,12 @@ impl ParticipantRuntime {
     }
     pub fn tick(&mut self) -> io::Result<()> {
         if self.last_heartbeat.elapsed() >= self.heartbeat_interval {
+            // Renew participant activity with the discovery server.
+            self.discovery.heartbeat(self.participant.id())?;
+
+            // Continue sending heartbeats to discovered peers.
             self.send_heartbeat()?;
+
             self.last_heartbeat = Instant::now();
         }
 

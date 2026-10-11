@@ -166,6 +166,11 @@ where
             SequenceEvent::Late => {}
             SequenceEvent::Duplicate => {
                 println!("Ignoring duplicate sequence: {}", sequence_number);
+
+                if self.qos.reliability() == crate::Reliability::Reliable {
+                    self.send_ack(&sender, sequence_number)?;
+                }
+
                 return Ok(None);
             }
         }
@@ -247,5 +252,95 @@ mod tests {
             subscriber.liveliness.state(42),
             crate::LivelinessState::Alive
         );
+    }
+    #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+    struct TestPayload {
+        value: u32,
+    }
+
+    #[test]
+    fn duplicate_reliable_message_is_acknowledged_without_redelivery() {
+        let topic = Topic::new("test/duplicate-ack", "TestPayload");
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let mut subscriber = Subscriber::<TestPayload>::new(
+            topic.clone(),
+            discovery,
+            transport,
+            QosPolicy::new(10, crate::Reliability::Reliable),
+        )
+        .unwrap();
+
+        let publisher = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        publisher
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+
+        let subscriber_address = subscriber.local_addr().unwrap();
+        let publisher_address = publisher.local_addr().unwrap();
+
+        let payload = crate::serialize_payload(&TestPayload { value: 42 }).unwrap();
+
+        let message = NetworkMessage::Data(crate::WireMessage {
+            sequence_number: 1,
+            topic: topic.name().to_string(),
+            type_name: topic.type_name().to_string(),
+            payload,
+        });
+
+        let bytes = crate::encode_network_message(&message).unwrap();
+
+        // First delivery: the subscriber should return the payload and ACK it.
+        publisher.send_to(&bytes, subscriber_address).unwrap();
+
+        assert_eq!(
+            subscriber.try_receive().unwrap(),
+            Some(TestPayload { value: 42 })
+        );
+
+        assert_ack_received(&publisher, topic.name(), 1);
+
+        // Simulate retransmission after the first ACK was lost.
+        publisher.send_to(&bytes, subscriber_address).unwrap();
+
+        // The duplicate must not be delivered again.
+        assert_eq!(subscriber.try_receive().unwrap(), None);
+
+        // But the subscriber must send another ACK.
+        assert_ack_received(&publisher, topic.name(), 1);
+
+        // Confirm that the ACKs came from the subscriber.
+        assert_ne!(publisher_address, subscriber_address);
+    }
+
+    fn assert_ack_received(
+        publisher: &std::net::UdpSocket,
+        expected_topic: &str,
+        expected_sequence: u64,
+    ) {
+        let mut buffer = [0u8; 65_535];
+
+        let (size, sender) = publisher
+            .recv_from(&mut buffer)
+            .expect("expected an ACK from the subscriber");
+
+        match crate::decode_network_message(&buffer[..size]).unwrap() {
+            NetworkMessage::Control(ControlMessage::Ack {
+                topic,
+                sequence_number,
+            }) => {
+                assert_eq!(topic, expected_topic);
+                assert_eq!(sequence_number, expected_sequence);
+            }
+            other => panic!("expected ACK, got {other:?}"),
+        }
     }
 }

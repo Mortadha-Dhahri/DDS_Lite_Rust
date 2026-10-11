@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -14,7 +15,7 @@ pub struct Subscriber<T> {
     topic: Topic,
     _discovery: NetworkDiscovery,
     transport: UdpTransport,
-    sequence_tracker: SequenceTracker,
+    sequence_trackers: HashMap<SocketAddr, SequenceTracker>,
     liveliness: LivelinessTracker,
     qos: QosPolicy,
     _marker: std::marker::PhantomData<T>,
@@ -34,7 +35,7 @@ where
             topic,
             _discovery: discovery,
             transport,
-            sequence_tracker: SequenceTracker::new(),
+            sequence_trackers: HashMap::new(),
             liveliness: LivelinessTracker::new(qos.liveliness_timeout()),
             qos,
             _marker: std::marker::PhantomData,
@@ -157,7 +158,13 @@ where
 
         let sequence_number = message.sequence_number;
 
-        match self.sequence_tracker.observe(sequence_number) {
+        // Each publisher has an independent sequence-number stream.
+        let sequence_event = self
+            .sequence_trackers
+            .entry(sender)
+            .or_default()
+            .observe(sequence_number);
+        match sequence_event {
             SequenceEvent::First => {}
             SequenceEvent::Contiguous => {}
             SequenceEvent::Gap { missing } => {
@@ -342,5 +349,72 @@ mod tests {
             }
             other => panic!("expected ACK, got {other:?}"),
         }
+    }
+    #[test]
+    fn messages_from_different_publishers_have_independent_sequences() {
+        let topic = Topic::new("test/multiple-publishers", "TestPayload");
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let mut subscriber = Subscriber::<TestPayload>::new(
+            topic.clone(),
+            discovery,
+            transport,
+            QosPolicy::new(10, crate::Reliability::Reliable),
+        )
+        .unwrap();
+
+        let publisher_a = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let publisher_b = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        let subscriber_address = subscriber.local_addr().unwrap();
+
+        let make_message = |value| {
+            let payload = crate::serialize_payload(&TestPayload { value }).unwrap();
+
+            let message = NetworkMessage::Data(crate::WireMessage {
+                sequence_number: 1,
+                topic: topic.name().to_string(),
+                type_name: topic.type_name().to_string(),
+                payload,
+            });
+
+            crate::encode_network_message(&message).unwrap()
+        };
+
+        // Both publishers independently begin with sequence 1.
+        publisher_a
+            .send_to(&make_message(10), subscriber_address)
+            .unwrap();
+
+        publisher_b
+            .send_to(&make_message(20), subscriber_address)
+            .unwrap();
+
+        // Both messages should reach the application.
+        let first = subscriber.try_receive().unwrap();
+        let second = subscriber.try_receive().unwrap();
+
+        assert!(
+            first.is_some(),
+            "the first publisher's message should be delivered"
+        );
+
+        assert!(
+            second.is_some(),
+            "the second publisher's sequence 1 must not be treated as a duplicate"
+        );
+
+        let mut values = vec![first.unwrap().value, second.unwrap().value];
+
+        values.sort_unstable();
+
+        assert_eq!(values, vec![10, 20]);
     }
 }

@@ -154,7 +154,6 @@ fn publisher_refresh_discovers_late_subscriber() {
         "Subscriber B should not receive data before the cache is refreshed"
     );
 
-    // 4. Refresh discovery so the publisher learns about subscriber B.
     // 4. Wait for the automatic refresh interval to expire.
     thread::sleep(Duration::from_millis(600));
 

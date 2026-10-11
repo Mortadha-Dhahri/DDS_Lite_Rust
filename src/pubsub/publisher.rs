@@ -886,4 +886,125 @@ mod tests {
             "publisher sent an unexpected retransmission after reaching the limit"
         );
     }
+    #[test]
+    fn retransmission_limit_is_independent_per_subscriber() {
+        let exhausted_receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let active_receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        for receiver in [&exhausted_receiver, &active_receiver] {
+            receiver
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .unwrap();
+        }
+
+        let exhausted_address = exhausted_receiver.local_addr().unwrap();
+        let active_address = active_receiver.local_addr().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/independent-retries", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic, discovery, transport, qos).unwrap();
+
+        publisher.history.push(1, TestMessage { value: 42 });
+
+        // Subscriber A has exhausted its retry budget.
+        publisher
+            .pending_acks
+            .entry(exhausted_address)
+            .or_default()
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now() - Duration::from_secs(1),
+                    retransmission_attempts: MAX_RETRANSMISSIONS,
+                },
+            );
+
+        // Subscriber B still has retries available.
+        publisher
+            .pending_acks
+            .entry(active_address)
+            .or_default()
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now() - Duration::from_secs(1),
+                    retransmission_attempts: 1,
+                },
+            );
+
+        assert_eq!(publisher.pending_ack_count(), 2);
+
+        publisher
+            .retransmit_expired_acknowledgements(Duration::ZERO)
+            .unwrap();
+
+        // Subscriber A's exhausted entry must be removed.
+        assert!(
+            !publisher.pending_acks.contains_key(&exhausted_address),
+            "exhausted subscriber should have no pending ACK entries"
+        );
+
+        // Subscriber B's message should have been retransmitted.
+        let mut buffer = [0u8; 65_535];
+
+        let (size, sender) = active_receiver
+            .recv_from(&mut buffer)
+            .expect("active subscriber should receive a retransmission");
+
+        assert_eq!(
+            sender,
+            publisher.transport.local_addr().unwrap(),
+            "retransmission should originate from the publisher"
+        );
+
+        match decode_network_message(&buffer[..size]).unwrap() {
+            NetworkMessage::Data(message) => {
+                assert_eq!(message.sequence_number, 1);
+                assert_eq!(message.topic, "test/independent-retries");
+            }
+            NetworkMessage::Control(_) => {
+                panic!("expected a retransmitted data message");
+            }
+        }
+
+        // Subscriber B remains pending, with its retry count incremented.
+        let pending = publisher
+            .pending_acks
+            .get(&active_address)
+            .and_then(|entries| entries.get(&1))
+            .expect("active subscriber's pending ACK should remain");
+
+        assert_eq!(pending.retransmission_attempts, 2);
+
+        // Subscriber A must not receive a retransmission.
+        let mut buffer = [0u8; 65_535];
+
+        let result = exhausted_receiver.recv_from(&mut buffer);
+
+        assert!(
+            matches!(
+                result,
+                Err(ref error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut
+            ),
+            "exhausted subscriber must not receive another retransmission"
+        );
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            1,
+            "only the active subscriber's pending ACK should remain"
+        );
+    }
 }

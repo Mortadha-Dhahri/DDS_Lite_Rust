@@ -1178,4 +1178,76 @@ mod tests {
             "the original subscriber's pending ACK must remain"
         );
     }
+    #[test]
+    fn acknowledgement_clears_only_the_matching_subscribers_pending_state() {
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/multi-subscriber-ack", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        let subscriber_a = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let subscriber_b = UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        let address_a = subscriber_a.local_addr().unwrap();
+        let address_b = subscriber_b.local_addr().unwrap();
+
+        // Both subscribers are waiting for ACK sequence 1.
+        for address in [address_a, address_b] {
+            publisher.pending_acks.entry(address).or_default().insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now(),
+                    retransmission_attempts: 0,
+                },
+            );
+        }
+
+        assert_eq!(publisher.pending_ack_count(), 2);
+
+        // Subscriber A acknowledges sequence 1.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 1,
+                },
+                address_a,
+            )
+            .unwrap();
+
+        // Only subscriber A's pending ACK should be removed.
+        assert_eq!(publisher.pending_ack_count(), 1);
+        assert!(!publisher.pending_acks.contains_key(&address_a));
+
+        assert!(
+            publisher
+                .pending_acks
+                .get(&address_b)
+                .unwrap()
+                .contains_key(&1),
+            "subscriber B's ACK must remain pending"
+        );
+
+        // Subscriber B acknowledges the same sequence.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 1,
+                },
+                address_b,
+            )
+            .unwrap();
+
+        assert_eq!(publisher.pending_ack_count(), 0);
+    }
 }

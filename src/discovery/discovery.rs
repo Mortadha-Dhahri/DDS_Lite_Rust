@@ -82,7 +82,6 @@ impl Default for LocalDiscovery {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,8 +137,7 @@ mod tests {
         assert_eq!(discovery.participant_address(2), Some(address_2));
 
         // Participant 2's subscriber endpoint must remain discoverable.
-        let subscribers =
-            discovery.lookup("vehicle/state", EndpointKind::Subscriber);
+        let subscribers = discovery.lookup("vehicle/state", EndpointKind::Subscriber);
 
         assert_eq!(subscribers.len(), 1);
         assert_eq!(subscribers[0].participant_id, 2);

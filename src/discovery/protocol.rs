@@ -41,6 +41,10 @@ pub enum DiscoveryRequest {
         topic: String,
         kind: EndpointKind,
     },
+
+    Heartbeat {
+        participant_id: u64,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

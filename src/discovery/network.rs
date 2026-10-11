@@ -100,4 +100,17 @@ impl NetworkDiscovery {
             )),
         }
     }
+
+    pub fn heartbeat(&self, participant_id: u64) -> io::Result<()> {
+        let request = DiscoveryRequest::Heartbeat { participant_id };
+
+        match self.request(request)? {
+            DiscoveryResponse::Registered => Ok(()),
+            DiscoveryResponse::Error(message) => Err(io::Error::other(message)),
+            response => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unexpected discovery response: {response:?}"),
+            )),
+        }
+    }
 }

@@ -44,6 +44,9 @@ impl LivelinessTracker {
             })
             .collect()
     }
+    pub fn forget(&mut self, participant_id: u64) {
+        self.participants.remove(&participant_id);
+    }
 }
 
 #[cfg(test)]

@@ -1118,4 +1118,64 @@ mod tests {
             "only the ACK for the retransmittable sequence should remain"
         );
     }
+    #[test]
+    fn acknowledgement_from_unknown_subscriber_preserves_pending_state() {
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/ack-isolation", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        let subscriber = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let unknown_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+
+        let subscriber_address = subscriber.local_addr().unwrap();
+        let unknown_address = unknown_sender.local_addr().unwrap();
+
+        publisher
+            .pending_acks
+            .entry(subscriber_address)
+            .or_default()
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now(),
+                    retransmission_attempts: 0,
+                },
+            );
+
+        // An unrelated sender acknowledges sequence 1.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 1,
+                },
+                unknown_address,
+            )
+            .unwrap();
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            1,
+            "an ACK from an unknown subscriber must not clear another subscriber's pending ACK"
+        );
+
+        assert!(
+            publisher
+                .pending_acks
+                .get(&subscriber_address)
+                .unwrap()
+                .contains_key(&1),
+            "the original subscriber's pending ACK must remain"
+        );
+    }
 }

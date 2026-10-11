@@ -262,14 +262,19 @@ where
             };
 
             if attempts >= MAX_RETRANSMISSIONS {
-                if let Some(pending) = self.pending_acks.get_mut(&subscriber) {
-                    pending.remove(&sequence_number);
+                self.remove_pending_ack(subscriber, sequence_number);
+                continue;
+            }
 
-                    if pending.is_empty() {
-                        self.pending_acks.remove(&subscriber);
-                    }
-                }
+            // The sample may have been evicted from publisher history.
+            // Remove its pending ACK instead of retrying indefinitely.
+            if self.history.find(sequence_number).is_none() {
+                println!(
+                    "Dropping pending ACK for sequence {} to {}: sample is no longer in history.",
+                    sequence_number, subscriber
+                );
 
+                self.remove_pending_ack(subscriber, sequence_number);
                 continue;
             }
 
@@ -355,6 +360,15 @@ where
     }
     pub fn set_subscriber_refresh_interval(&mut self, interval: Duration) {
         self.subscriber_refresh_interval = interval;
+    }
+    fn remove_pending_ack(&mut self, subscriber: SocketAddr, sequence_number: u64) {
+        if let Some(pending) = self.pending_acks.get_mut(&subscriber) {
+            pending.remove(&sequence_number);
+
+            if pending.is_empty() {
+                self.pending_acks.remove(&subscriber);
+            }
+        }
     }
 }
 
@@ -1005,6 +1019,103 @@ mod tests {
             publisher.pending_ack_count(),
             1,
             "only the active subscriber's pending ACK should remain"
+        );
+    }
+    #[test]
+    fn missing_history_removes_only_the_unretransmittable_pending_ack() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/missing-history-retry", "TestMessage");
+        let qos = QosPolicy::new(1, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        // History depth is 1, so inserting sequence 2 evicts sequence 1.
+        publisher.history.push(1, TestMessage { value: 10 });
+        publisher.history.push(2, TestMessage { value: 20 });
+
+        assert!(publisher.history.find(1).is_none());
+        assert!(publisher.history.find(2).is_some());
+
+        let expired_at = Instant::now() - Duration::from_secs(1);
+
+        // Both sequences have expired pending ACKs.
+        let pending = publisher.pending_acks.entry(receiver_address).or_default();
+
+        pending.insert(
+            1,
+            PendingAck {
+                sent_at: expired_at,
+                retransmission_attempts: 0,
+            },
+        );
+
+        pending.insert(
+            2,
+            PendingAck {
+                sent_at: expired_at,
+                retransmission_attempts: 0,
+            },
+        );
+
+        publisher
+            .retransmit_expired_acknowledgements(Duration::ZERO)
+            .unwrap();
+
+        let pending = publisher
+            .pending_acks
+            .get(&receiver_address)
+            .expect("available sequence should keep the pending ACK map");
+
+        assert!(
+            !pending.contains_key(&1),
+            "pending ACK for the evicted sample should be removed"
+        );
+
+        assert_eq!(
+            pending.get(&2).unwrap().retransmission_attempts,
+            1,
+            "available sample should still be retransmitted and tracked"
+        );
+
+        // Verify that sequence 2 was actually sent.
+        let mut buffer = [0u8; 65_535];
+
+        let (size, _) = receiver
+            .recv_from(&mut buffer)
+            .expect("available sequence 2 should be retransmitted");
+
+        match decode_network_message(&buffer[..size]).unwrap() {
+            NetworkMessage::Data(message) => {
+                assert_eq!(message.sequence_number, 2);
+
+                let decoded: TestMessage = deserialize_payload(&message.payload).unwrap();
+
+                assert_eq!(decoded, TestMessage { value: 20 });
+            }
+            NetworkMessage::Control(_) => {
+                panic!("expected a retransmitted data message");
+            }
+        }
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            1,
+            "only the ACK for the retransmittable sequence should remain"
         );
     }
 }

@@ -60,3 +60,23 @@
         assert_eq!(subscribers.len(), 1);
         assert_eq!(subscribers[0].participant_id, 2);
     }
+#[test]
+    fn duplicate_participant_and_endpoint_registration_is_idempotent() {
+        let mut discovery = LocalDiscovery::new();
+        let address = "127.0.0.1:7001".parse().unwrap();
+
+        discovery.register_participant(Participant::new(1, address));
+        discovery.register_participant(Participant::new(1, address));
+        for _ in 0..2 {
+            discovery.register_endpoint(Endpoint {
+                participant_id: 1,
+                topic: "vehicle/state".to_string(),
+                kind: EndpointKind::Subscriber,
+            });
+        }
+
+        let endpoints = discovery.lookup("vehicle/state", EndpointKind::Subscriber);
+        assert_eq!(endpoints.len(), 1);
+        assert_eq!(discovery.participants.len(), 1);
+    }
+

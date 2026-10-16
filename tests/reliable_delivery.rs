@@ -643,3 +643,235 @@ fn late_ack_clears_delivery_failure_after_retry_exhaustion() {
     assert!(!publisher.delivery_failed(receiver_address, 1));
     assert_eq!(publisher.pending_ack_count(), 0);
 }
+#[test]
+fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
+    // Start discovery on an OS-assigned port.
+    let mut server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let discovery_server_address = server.local_addr().unwrap();
+
+    thread::spawn(move || {
+        server.run().unwrap();
+    });
+
+    // Three distinct UDP endpoints:
+    // publisher -> relay -> subscriber
+    let relay = UdpSocket::bind("127.0.0.1:0").unwrap();
+    relay
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+
+    let relay_address = relay.local_addr().unwrap();
+
+    let publisher_transport =
+        UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let publisher_address = publisher_transport.local_addr().unwrap();
+
+    let subscriber_transport =
+        UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber_address = subscriber_transport.local_addr().unwrap();
+
+    // Register the relay as the subscriber endpoint. This ensures the
+    // publisher's pending ACKs are tracked against the relay's address.
+    let publisher_participant = Participant::new(101, publisher_address);
+    let relay_participant = Participant::new(102, relay_address);
+
+    let publisher_discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address)
+            .unwrap();
+
+    publisher_discovery
+        .register_participant(&publisher_participant)
+        .unwrap();
+
+    publisher_discovery
+        .register_participant(&relay_participant)
+        .unwrap();
+
+    let topic = Topic::new("test/reliable-gap-recovery", "TestMessage");
+
+    publisher_discovery
+        .register_endpoint(
+            publisher_participant.id(),
+            topic.name(),
+            EndpointKind::Publisher,
+        )
+        .unwrap();
+
+    publisher_discovery
+        .register_endpoint(
+            relay_participant.id(),
+            topic.name(),
+            EndpointKind::Subscriber,
+        )
+        .unwrap();
+
+    let subscriber_discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address)
+            .unwrap();
+
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        publisher_discovery,
+        publisher_transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    let mut subscriber = Subscriber::<TestMessage>::new(
+        topic.clone(),
+        subscriber_discovery,
+        subscriber_transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    let mut buffer = vec![0u8; 65_535];
+
+    // ---------------------------------------------------------------
+    // 1. Sequence 1: normal delivery and ACK.
+    // ---------------------------------------------------------------
+    publisher
+        .publish(&TestMessage { value: 10 })
+        .unwrap();
+
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, publisher_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Data(data) => assert_eq!(data.sequence_number, 1),
+        _ => panic!("Expected DATA sequence 1"),
+    }
+
+    relay
+        .send_to(&buffer[..size], subscriber_address)
+        .unwrap();
+
+    assert_eq!(subscriber.receive().unwrap(), TestMessage { value: 10 });
+
+    // Forward the subscriber's ACK to the publisher.
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, subscriber_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Control(ControlMessage::Ack {
+            sequence_number: 1,
+            ..
+        }) => {}
+        other => panic!("Expected ACK for sequence 1, got {other:?}"),
+    }
+
+    relay.send_to(&buffer[..size], publisher_address).unwrap();
+    publisher.receive_control().unwrap();
+
+    assert_eq!(publisher.pending_ack_count(), 0);
+
+    // ---------------------------------------------------------------
+    // 2. Sequence 2: deliberately drop the original DATA packet.
+    // ---------------------------------------------------------------
+    publisher
+        .publish(&TestMessage { value: 20 })
+        .unwrap();
+
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, publisher_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Data(data) => assert_eq!(data.sequence_number, 2),
+        _ => panic!("Expected DATA sequence 2"),
+    }
+
+    // Intentionally do not forward sequence 2.
+
+    // ---------------------------------------------------------------
+    // 3. Sequence 3: forward it so the subscriber detects the gap.
+    // ---------------------------------------------------------------
+    publisher
+        .publish(&TestMessage { value: 30 })
+        .unwrap();
+
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, publisher_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Data(data) => assert_eq!(data.sequence_number, 3),
+        _ => panic!("Expected DATA sequence 3"),
+    }
+
+    relay
+        .send_to(&buffer[..size], subscriber_address)
+        .unwrap();
+
+    assert_eq!(subscriber.receive().unwrap(), TestMessage { value: 30 });
+
+    // The subscriber should send NACK(2), followed by ACK(3).
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, subscriber_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Control(ControlMessage::Nack {
+            missing_sequences,
+            ..
+        }) => assert_eq!(missing_sequences, vec![2]),
+        other => panic!("Expected NACK for sequence 2, got {other:?}"),
+    }
+
+    relay.send_to(&buffer[..size], publisher_address).unwrap();
+
+    // The publisher handles the NACK and retransmits sequence 2.
+    publisher.receive_control().unwrap();
+
+    // Sequence 3's ACK was sent immediately after the NACK. Forward it
+    // before processing the retransmitted DATA packet.
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, subscriber_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Control(ControlMessage::Ack {
+            sequence_number: 3,
+            ..
+        }) => {}
+        other => panic!("Expected ACK for sequence 3, got {other:?}"),
+    }
+
+    relay.send_to(&buffer[..size], publisher_address).unwrap();
+
+    // The retransmitted sequence 2 must now arrive at the relay.
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, publisher_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Data(data) => assert_eq!(data.sequence_number, 2),
+        _ => panic!("Expected retransmitted DATA sequence 2"),
+    }
+
+    relay
+        .send_to(&buffer[..size], subscriber_address)
+        .unwrap();
+
+    // The subscriber recognizes sequence 2 as late but valid, delivers
+    // it to the application, and ACKs it.
+    assert_eq!(subscriber.receive().unwrap(), TestMessage { value: 20 });
+
+    let (size, sender) = relay.recv_from(&mut buffer).unwrap();
+    assert_eq!(sender, subscriber_address);
+
+    match decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Control(ControlMessage::Ack {
+            sequence_number: 2,
+            ..
+        }) => {}
+        other => panic!("Expected ACK for sequence 2, got {other:?}"),
+    }
+
+    relay.send_to(&buffer[..size], publisher_address).unwrap();
+
+    // Process ACK(3), then ACK(2).
+    publisher.receive_control().unwrap();
+    publisher.receive_control().unwrap();
+
+    assert_eq!(
+        publisher.pending_ack_count(),
+        0,
+        "All reliable deliveries should be acknowledged after recovery"
+    );
+}

@@ -232,7 +232,6 @@ fn corrupt_payload_does_not_advance_sequence_tracker() {
 }
 
 #[test]
-#[test]
 fn sequence_one_after_high_water_mark_starts_a_new_stream() {
     let topic = Topic::new("test/publisher-restart", "TestPayload");
     let discovery = NetworkDiscovery::bind(

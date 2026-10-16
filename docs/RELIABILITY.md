@@ -25,7 +25,11 @@ This document describes the behavior covered by the current implementation and t
 
 ## Subscriber sequence handling
 
-- Sequence tracking is scoped per publisher.
+- Sequence tracking is scoped by publisher UDP address and publisher session ID.
+- Each publisher instance generates a unique session ID and reuses it for all published samples and retransmissions during that instance's lifetime.
+- When a subscriber receives a sample from a new session at an address with an active session, it retires the previous session and activates the new one.
+- Packets from retired sessions are ignored, preventing delayed packets from an old publisher instance from reactivating that session.
+- Each publisher session maintains independent sequence state. A restarted publisher can therefore begin at sequence 1 without inheriting the previous session's high-water mark.
 - A duplicate reliable sample is acknowledged but not delivered to the application a second time.
 - Missing sequence numbers are tracked so the receiver can identify gaps and recognize when missing samples arrive.
 
@@ -37,8 +41,9 @@ This document describes the behavior covered by the current implementation and t
 - Sequence-gap tracking retains at most 128 missing sequence numbers and sends at most that many in one NACK. This bounds allocation and control-datagram size, but a larger gap is only partially requested for retransmission.
 - Publisher fan-out attempts every discovered subscriber even when an individual UDP send fails, then returns the first send error.
 - Local discovery registration is idempotent for participant IDs and for the participant/topic/kind endpoint tuple.
-- If a subscriber sees sequence 1 from an address whose high-water mark is greater than 1, it resets that address's tracker. This handles the common restart case without changing the current wire format, but it is a heuristic: a delayed old sequence-1 packet could also be mistaken for a restart. An explicit publisher-session ID is the stronger long-term protocol fix.
+- A subscriber validates the payload before updating sequence state; a corrupt payload is ignored and is not ACKed.
 
 ## Scope and limitations
 
 The current implementation is a learning-focused DDS-inspired middleware. These tests cover selected reliability invariants, not every failure mode or interoperability requirement of DDS/RTPS. In particular, successful unit tests do not prove lossless delivery under arbitrary packet loss, process crashes, or network partitions.
+Adding `publisher_session_id` changes the serialized `WireMessage` format. This implementation does not currently provide a wire-protocol version negotiation or backward-compatibility mechanism, so binaries built against different message formats may be unable to communicate correctly. Run compatible versions of the publisher and subscriber together.

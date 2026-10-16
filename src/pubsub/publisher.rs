@@ -3,7 +3,6 @@ use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
@@ -13,7 +12,6 @@ use crate::{
 };
 
 const MAX_RETRANSMISSIONS: u8 = 3;
-static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy)]
 struct PendingAck {
@@ -28,7 +26,6 @@ pub struct Publisher<T> {
     qos: QosPolicy,
     history: History<T>,
     next_sequence_number: u64,
-    session_id: u64,
     pending_acks: HashMap<SocketAddr, HashMap<u64, PendingAck>>,
     nack_attempts: HashMap<SocketAddr, HashMap<u64, u8>>,
     last_subscriber_refresh: Option<Instant>,
@@ -54,7 +51,6 @@ where
             qos: qos.clone(),
             history: History::new(qos.history_depth()),
             next_sequence_number: 1,
-            session_id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
             pending_acks: HashMap::new(),
             nack_attempts: HashMap::new(),
             subscribers: None,
@@ -91,7 +87,6 @@ where
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         let message = WireMessage {
-            session_id: self.session_id,
             sequence_number,
             topic: self.topic.name().to_string(),
             type_name: self.topic.type_name().to_string(),
@@ -121,9 +116,8 @@ where
                     }
                 }
                 Err(error) => {
-                    // A single unreachable subscriber must not prevent fan-out to
-                    // every other discovered subscriber. Report the first failure
-                    // after attempting all destinations.
+                    // Continue fan-out even if one destination fails. Preserve the
+                    // first error and return it after attempting all subscribers.
                     if first_send_error.is_none() {
                         first_send_error = Some(error);
                     }
@@ -133,63 +127,6 @@ where
 
         if let Some(error) = first_send_error {
             return Err(error);
-        }
-
-        Ok(())
-    }
-
-    pub fn retransmit(&self, sequence_number: u64, destination: SocketAddr) -> io::Result<()> {
-        let entry = match self.history.find(sequence_number) {
-            Some(entry) => entry,
-            None => {
-                println!(
-                    "Cannot retransmit sequence {}: \\
-                     sample is no longer in history.",
-                    sequence_number
-                );
-
-                return Ok(());
-            }
-        };
-
-        let payload = serialize_payload(entry.data())
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-
-        let message = WireMessage {
-            session_id: self.session_id,
-            sequence_number: entry.sequence_number(),
-            topic: self.topic.name().to_string(),
-            type_name: self.topic.type_name().to_string(),
-            payload,
-        };
-
-        let network_message = NetworkMessage::Data(message);
-
-        let bytes = encode_network_message(&network_message)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-
-        self.transport.send(&bytes, destination)?;
-
-        println!(
-            "Retransmitted sequence {} to {}.",
-            sequence_number, destination
-        );
-
-        Ok(())
-    }
-
-    pub fn handle_control_message(
-                self.pending_acks
-                    .entry(subscriber.address)
-                    .or_default()
-                    .insert(
-                        sequence_number,
-                        PendingAck {
-                            sent_at: Instant::now(),
-                            retransmission_attempts: 0,
-                        },
-                    );
-            }
         }
 
         Ok(())
@@ -275,8 +212,8 @@ where
                 }
             }
             ControlMessage::Heartbeat { participant_id } => {
-                // Heartbeats are expected on participant sockets as well as on the
-                // discovery socket. Observing one here must never panic the publisher.
+                // A heartbeat is valid traffic on this UDP socket; it must not panic
+                // the publisher control loop.
                 println!("Received heartbeat from participant {} at {}.", participant_id, sender);
             }
         }

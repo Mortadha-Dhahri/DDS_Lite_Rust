@@ -83,3 +83,37 @@
 
         assert_eq!(tracker.observe(3), SequenceEvent::Duplicate);
     }
+#[test]
+    fn huge_gap_is_bounded() {
+        let mut tracker = SequenceTracker::new();
+        tracker.observe(1);
+
+        let event = tracker.observe(u64::MAX);
+
+        match event {
+            SequenceEvent::Gap { missing } => {
+                assert_eq!(missing.len(), super::super::MAX_TRACKED_GAP as usize);
+                assert_eq!(missing.last().copied(), Some(u64::MAX - 1));
+            }
+            other => panic!("expected a bounded gap event, got {other:?}"),
+        }
+
+        assert_eq!(
+            tracker.missing_sequences().count(),
+            super::super::MAX_TRACKED_GAP as usize
+        );
+    }
+
+    #[test]
+    fn tracker_can_reset_for_a_new_publisher_stream() {
+        let mut tracker = SequenceTracker::new();
+        tracker.observe(1);
+        tracker.observe(8);
+
+        tracker.reset();
+
+        assert_eq!(tracker.last_sequence(), 0);
+        assert!(!tracker.has_missing());
+        assert_eq!(tracker.observe(1), SequenceEvent::First);
+    }
+

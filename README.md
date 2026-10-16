@@ -52,6 +52,18 @@ The implementation will progressively reproduce selected concepts in a simplifie
 * [ ] Benchmarks
 * [ ] ROS 2 integration
 
+## Testing
+
+Run the complete suite and static checks from the repository root:
+
+```bash
+cargo test
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Unit tests are grouped by behavior under [`unit_tests/`](unit_tests/README.md); multi-component UDP coverage is under [`tests/reliable_delivery.rs`](tests/reliable_delivery.rs). See [the testing guide](docs/TESTING.md) and [reliable-delivery expectations](docs/RELIABILITY.md) for details.
+
 ## License
 
 MIT

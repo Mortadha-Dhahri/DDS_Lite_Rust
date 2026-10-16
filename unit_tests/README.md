@@ -32,7 +32,7 @@ cargo test --lib receive_semantics
 cargo test --lib sequence_tracking
 
 # One named test, with output visible
-cargo test nack_cannot_reset_retry_budget_after_pending_ack_expires -- --exact --nocapture
+cargo test nack_cannot_reset_retry_budget_after_pending_ack_expires -- --nocapture
 
 # Integration tests only
 cargo test --test reliable_delivery

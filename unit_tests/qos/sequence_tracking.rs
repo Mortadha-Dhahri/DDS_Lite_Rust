@@ -2,7 +2,7 @@
 //! These tests are compiled as child modules of the implementation module so they can
 //! verify internal invariants without exposing private implementation details.
 
-    use super::{SequenceEvent, SequenceTracker};
+    use super::{SequenceEvent, SequenceTracker, MAX_TRACKED_GAP};
 
     #[test]
     fn first_sequence() {
@@ -92,7 +92,7 @@
 
         match event {
             SequenceEvent::Gap { missing } => {
-                assert_eq!(missing.len(), super::super::MAX_TRACKED_GAP as usize);
+                assert_eq!(missing.len(), MAX_TRACKED_GAP as usize);
                 assert_eq!(missing.last().copied(), Some(u64::MAX - 1));
             }
             other => panic!("expected a bounded gap event, got {other:?}"),
@@ -100,7 +100,7 @@
 
         assert_eq!(
             tracker.missing_sequences().count(),
-            super::super::MAX_TRACKED_GAP as usize
+            MAX_TRACKED_GAP as usize
         );
     }
 

@@ -271,10 +271,14 @@ where
             };
 
             if attempts >= MAX_RETRANSMISSIONS {
+                self.nack_attempts
+                    .entry(subscriber)
+                    .or_default()
+                    .insert(sequence_number, attempts);
+
                 self.remove_pending_ack(subscriber, sequence_number);
                 continue;
             }
-
             // The sample may have been evicted from publisher history.
             // Remove its pending ACK instead of retrying indefinitely.
             if self.history.find(sequence_number).is_none() {
@@ -1799,6 +1803,73 @@ mod tests {
             publisher.pending_ack_count(),
             1,
             "the retry limit should not itself remove the pending ACK"
+        );
+    }
+    #[test]
+    fn nack_cannot_reset_retry_budget_after_pending_ack_expires() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let topic = Topic::new("test/retry-budget", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        publisher.history.push(1, TestMessage { value: 42 });
+
+        publisher
+            .pending_acks
+            .entry(receiver_address)
+            .or_default()
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now() - Duration::from_secs(1),
+                    retransmission_attempts: MAX_RETRANSMISSIONS,
+                },
+            );
+
+        // The exhausted ACK entry should be removed without retransmission.
+        publisher
+            .retransmit_expired_acknowledgements(Duration::from_millis(100))
+            .unwrap();
+
+        assert_eq!(publisher.pending_ack_count(), 0);
+
+        // A subsequent NACK must not reset the exhausted retry budget.
+        publisher
+            .handle_control_message(
+                ControlMessage::Nack {
+                    topic: topic.name().to_string(),
+                    missing_sequences: vec![1],
+                },
+                receiver_address,
+            )
+            .unwrap();
+
+        let mut buffer = [0u8; 65_535];
+        let result = receiver.recv_from(&mut buffer);
+
+        assert!(
+            matches!(
+                result,
+                Err(ref error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut
+            ),
+            "NACK unexpectedly retransmitted a sample after the retry budget was exhausted"
         );
     }
 }

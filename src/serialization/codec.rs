@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WireMessage {
+    /// Identifies one publisher process/session so receivers can reset sequence tracking after restart.
+    #[serde(default)]
+    pub session_id: u64,
     pub sequence_number: u64,
     pub topic: String,
     pub type_name: String,

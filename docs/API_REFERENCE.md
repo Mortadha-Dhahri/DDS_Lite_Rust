@@ -93,3 +93,59 @@ Socket/discovery operations generally return `io::Result`; serialization returns
 - [Architecture overview](architecture.md)
 - [Reliability behavior](RELIABILITY.md)
 - [Testing guide](TESTING.md)
+
+
+## Complete method inventory
+
+This section lists additional accessors and operational methods so the reference can be used as a source map. The Rust declarations remain authoritative for exact generic bounds and multiline signatures.
+
+| Type / module | Method | Purpose |
+|---|---|---|
+| §Topic§ | §name()§, §type_name()§ | Read topic name and declared type. |
+| §Participant§ | §id()§, §address()§ | Read participant identity and socket address. |
+| §Message<T>§ | §topic()§, §data()§ | Borrow the local message topic and payload. |
+| §NetworkDiscovery§ | §register_participant(&Participant)§ | Register participant metadata with the discovery server. |
+| §NetworkDiscovery§ | §register_endpoint(participant_id, topic, kind)§ | Register the participant's publisher/subscriber endpoint. |
+| §NetworkDiscovery§ | §lookup(topic, kind)§ | Return discovered endpoints matching a topic and role. |
+| §NetworkDiscovery§ | §heartbeat(participant_id)§ | Refresh server-side participant activity. |
+| §DiscoveryServer§ | §local_addr()§ | Return the bound server address, useful when bound to port zero. |
+| §LocalDiscovery§ | §participant_address(id)§ | Resolve a registered participant ID to an optional socket address. |
+| §Publisher<T>§ | §retransmit(sequence, destination)§ | Send a retained sample to a specified address. |
+| §Publisher<T>§ | §local_addr()§ | Return publisher transport address. |
+| §Publisher<T>§ | §pending_ack_count()§ | Inspect number of pending acknowledgements. |
+| §Publisher<T>§ | §expired_acknowledgements(timeout)§ | List subscriber/sequence pairs whose ACK deadline has elapsed. |
+| §Publisher<T>§ | §retransmit_expired_acknowledgements(timeout)§ | Retry eligible deliveries whose ACK timed out. |
+| §Publisher<T>§ | §process_reliability(timeout)§ / §reliability_tick(timeout)§ | Process the reliability timer path explicitly. |
+| §Publisher<T>§ | §set_nonblocking(bool)§, §try_receive_control()§ | Configure/poll control receive without waiting. The poll returns whether a control datagram was handled. |
+| §Publisher<T>§ | §discovered_subscribers()§, §refresh_subscribers()§ | Read cached discovery results and refresh them. |
+| §Publisher<T>§ | §set_subscriber_refresh_interval(Duration)§ | Configure the refresh interval. |
+| §Subscriber<T>§ | §try_receive()§ | Nonblocking receive; returns §Ok(None)§ when no application sample is ready. |
+| §Subscriber<T>§ | §set_nonblocking(bool)§, §local_addr()§ | Configure socket receive mode and inspect bound address. |
+| §Subscriber<T>§ | §handle_control_message(ControlMessage)§ | Apply a decoded control message to subscriber-side state. |
+| §QosPolicy§ | §history_depth()§, §reliability()§, §liveliness_timeout()§ | Read active policy values. |
+| §QosPolicy§ | §with_liveliness_timeout(Duration)§ | Builder-style liveliness timeout override. |
+| §History<T>§ | §push(sequence, data)§, §len()§, §is_empty()§ | Add a sample and inspect bounded history. |
+| §History<T>§ | §samples()§, §find(sequence)§ | Iterate retained entries or locate a sequence. |
+| §HistoryEntry<T>§ | §sequence_number()§, §data()§ | Read entry sequence and borrow its payload. |
+| §SequenceTracker§ | §observe(sequence)§, §reset()§ | Update or clear sequence state. |
+| §SequenceTracker§ | §last_sequence()§, §missing_sequences()§, §has_missing()§ | Inspect high-water mark and gaps. |
+| §LivelinessTracker§ | §observe(id)§, §state(id)§ | Refresh a participant and read current state. |
+| §LivelinessTracker§ | §expired_participants()§, §forget(id)§ | List expired IDs and remove tracked state. |
+| Serialization codecs | §serialize_payload§, §deserialize_payload§ | Convert application payloads to/from bytes. |
+| Serialization codecs | §encode_message§, §decode_message§ | Convert a §WireMessage§ to/from bytes. |
+| Serialization codecs | §encode_control_message§, §decode_control_message§ | Convert a §ControlMessage§ to/from bytes. |
+| Serialization codecs | §encode_network_message§, §decode_network_message§ | Convert the top-level data/control enum to/from bytes. |
+| §Transport§ | §send(bytes, destination)§, §receive()§ | Trait-level datagram send and blocking receive. |
+| §UdpTransport§ | §bind(address)§, §local_addr()§ | Bind and inspect a UDP socket. |
+| §UdpTransport§ | §set_nonblocking(bool)§, §try_receive()§ | Configure/poll receive; no packet is represented as §Ok(None)§. |
+
+## Public data types
+
+- §Reliability::{BestEffort, Reliable}§ selects the publisher delivery mode.
+- §LivelinessState::{Alive, Expired}§ represents the tracked state for a participant.
+- §SequenceEvent§ classifies sequence observations (first/contiguous, duplicate, and gap-related cases as defined by the enum).
+- §EndpointKind::{Publisher, Subscriber}§ selects endpoint role for discovery.
+- §DiscoveryRequest§ and §DiscoveryResponse§ are the discovery protocol request/response enums.
+- §ControlMessage§ contains ACK, NACK, and heartbeat control variants.
+- §NetworkMessage::{Data, Control}§ wraps data and control traffic.
+- §WireMessage§ is the data envelope; its session ID is part of the serialized format.

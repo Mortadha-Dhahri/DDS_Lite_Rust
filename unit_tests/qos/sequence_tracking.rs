@@ -2,118 +2,117 @@
 //! These tests are compiled as child modules of the implementation module so they can
 //! verify internal invariants without exposing private implementation details.
 
-    use super::{SequenceEvent, SequenceTracker, MAX_TRACKED_GAP};
+use super::{MAX_TRACKED_GAP, SequenceEvent, SequenceTracker};
 
-    #[test]
-    fn first_sequence() {
-        let mut tracker = SequenceTracker::new();
-
-        let event = tracker.observe(1);
-
-        assert_eq!(event, SequenceEvent::First);
-        assert_eq!(tracker.last_sequence(), 1);
-    }
-
-    #[test]
-    fn contiguous_sequences() {
-        let mut tracker = SequenceTracker::new();
-
-        tracker.observe(1);
-
-        assert_eq!(tracker.observe(2), SequenceEvent::Contiguous);
-
-        assert_eq!(tracker.observe(3), SequenceEvent::Contiguous);
-
-        assert!(!tracker.has_missing());
-    }
-
-    #[test]
-    fn detects_gap() {
-        let mut tracker = SequenceTracker::new();
-
-        tracker.observe(1);
-
-        assert_eq!(
-            tracker.observe(4),
-            SequenceEvent::Gap {
-                missing: vec![2, 3],
-            }
-        );
-
-        assert_eq!(tracker.last_sequence(), 4);
-    }
-
-    #[test]
-    fn late_sequence_fills_gap() {
-        let mut tracker = SequenceTracker::new();
-
-        tracker.observe(1);
-        tracker.observe(4);
-
-        assert_eq!(tracker.observe(2), SequenceEvent::Late);
-
-        let missing: Vec<_> = tracker.missing_sequences().copied().collect();
-
-        assert_eq!(missing, vec![3]);
-    }
-
-    #[test]
-    fn duplicate_sequence() {
-        let mut tracker = SequenceTracker::new();
-
-        tracker.observe(1);
-        tracker.observe(2);
-
-        assert_eq!(tracker.observe(2), SequenceEvent::Duplicate);
-
-        assert_eq!(tracker.last_sequence(), 2);
-    }
-
-    #[test]
-    fn late_sequence_after_all_gaps_are_filled() {
-        let mut tracker = SequenceTracker::new();
-
-        tracker.observe(1);
-        tracker.observe(4);
-
-        tracker.observe(2);
-        tracker.observe(3);
-
-        assert!(!tracker.has_missing());
-
-        assert_eq!(tracker.observe(3), SequenceEvent::Duplicate);
-    }
 #[test]
-    fn huge_gap_is_bounded() {
-        let mut tracker = SequenceTracker::new();
-        tracker.observe(1);
+fn first_sequence() {
+    let mut tracker = SequenceTracker::new();
 
-        let event = tracker.observe(u64::MAX);
+    let event = tracker.observe(1);
 
-        match event {
-            SequenceEvent::Gap { missing } => {
-                assert_eq!(missing.len(), MAX_TRACKED_GAP as usize);
-                assert_eq!(missing.last().copied(), Some(u64::MAX - 1));
-            }
-            other => panic!("expected a bounded gap event, got {other:?}"),
+    assert_eq!(event, SequenceEvent::First);
+    assert_eq!(tracker.last_sequence(), 1);
+}
+
+#[test]
+fn contiguous_sequences() {
+    let mut tracker = SequenceTracker::new();
+
+    tracker.observe(1);
+
+    assert_eq!(tracker.observe(2), SequenceEvent::Contiguous);
+
+    assert_eq!(tracker.observe(3), SequenceEvent::Contiguous);
+
+    assert!(!tracker.has_missing());
+}
+
+#[test]
+fn detects_gap() {
+    let mut tracker = SequenceTracker::new();
+
+    tracker.observe(1);
+
+    assert_eq!(
+        tracker.observe(4),
+        SequenceEvent::Gap {
+            missing: vec![2, 3],
         }
+    );
 
-        assert_eq!(
-            tracker.missing_sequences().count(),
-            MAX_TRACKED_GAP as usize
-        );
+    assert_eq!(tracker.last_sequence(), 4);
+}
+
+#[test]
+fn late_sequence_fills_gap() {
+    let mut tracker = SequenceTracker::new();
+
+    tracker.observe(1);
+    tracker.observe(4);
+
+    assert_eq!(tracker.observe(2), SequenceEvent::Late);
+
+    let missing: Vec<_> = tracker.missing_sequences().copied().collect();
+
+    assert_eq!(missing, vec![3]);
+}
+
+#[test]
+fn duplicate_sequence() {
+    let mut tracker = SequenceTracker::new();
+
+    tracker.observe(1);
+    tracker.observe(2);
+
+    assert_eq!(tracker.observe(2), SequenceEvent::Duplicate);
+
+    assert_eq!(tracker.last_sequence(), 2);
+}
+
+#[test]
+fn late_sequence_after_all_gaps_are_filled() {
+    let mut tracker = SequenceTracker::new();
+
+    tracker.observe(1);
+    tracker.observe(4);
+
+    tracker.observe(2);
+    tracker.observe(3);
+
+    assert!(!tracker.has_missing());
+
+    assert_eq!(tracker.observe(3), SequenceEvent::Duplicate);
+}
+#[test]
+fn huge_gap_is_bounded() {
+    let mut tracker = SequenceTracker::new();
+    tracker.observe(1);
+
+    let event = tracker.observe(u64::MAX);
+
+    match event {
+        SequenceEvent::Gap { missing } => {
+            assert_eq!(missing.len(), MAX_TRACKED_GAP as usize);
+            assert_eq!(missing.last().copied(), Some(u64::MAX - 1));
+        }
+        other => panic!("expected a bounded gap event, got {other:?}"),
     }
 
-    #[test]
-    fn tracker_can_reset_for_a_new_publisher_stream() {
-        let mut tracker = SequenceTracker::new();
-        tracker.observe(1);
-        tracker.observe(8);
+    assert_eq!(
+        tracker.missing_sequences().count(),
+        MAX_TRACKED_GAP as usize
+    );
+}
 
-        tracker.reset();
+#[test]
+fn tracker_can_reset_for_a_new_publisher_stream() {
+    let mut tracker = SequenceTracker::new();
+    tracker.observe(1);
+    tracker.observe(8);
 
-        assert_eq!(tracker.last_sequence(), 0);
-        assert!(!tracker.has_missing());
-        assert_eq!(tracker.observe(1), SequenceEvent::First);
-    }
+    tracker.reset();
 
+    assert_eq!(tracker.last_sequence(), 0);
+    assert!(!tracker.has_missing());
+    assert_eq!(tracker.observe(1), SequenceEvent::First);
+}

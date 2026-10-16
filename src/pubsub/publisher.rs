@@ -216,7 +216,10 @@ where
             ControlMessage::Heartbeat { participant_id } => {
                 // A heartbeat is valid traffic on this UDP socket; it must not panic
                 // the publisher control loop.
-                println!("Received heartbeat from participant {} at {}.", participant_id, sender);
+                println!(
+                    "Received heartbeat from participant {} at {}.",
+                    participant_id, sender
+                );
             }
         }
 

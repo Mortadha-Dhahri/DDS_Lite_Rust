@@ -1,5 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
+use std::thread;
+use std::time::Duration;
 
 use dds_lite_rust::{
     EndpointKind, NetworkDiscovery, Participant, QosPolicy, Reliability, Subscriber, Topic,
@@ -46,6 +48,26 @@ fn main() -> io::Result<()> {
     println!("Topic: {TOPIC_NAME}");
     println!("Reliability: Reliable");
     println!("Waiting for {SAMPLE_COUNT} samples...\n");
+
+    // Keep the participant alive while receive() blocks waiting for data.
+    thread::spawn(move || {
+        let heartbeat_discovery =
+            match NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), server_address) {
+                Ok(discovery) => discovery,
+                Err(error) => {
+                    eprintln!("Failed to create heartbeat client: {error}");
+                    return;
+                }
+            };
+
+        loop {
+            if let Err(error) = heartbeat_discovery.heartbeat(PARTICIPANT_ID) {
+                eprintln!("Subscriber heartbeat failed: {error}");
+            }
+
+            thread::sleep(Duration::from_secs(2));
+        }
+    });
 
     let topic = Topic::new(TOPIC_NAME, "VehicleState");
     let qos = QosPolicy::new(10, Reliability::Reliable);

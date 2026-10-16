@@ -114,12 +114,19 @@ impl DiscoveryServer {
                     let request = match bincode::deserialize::<DiscoveryRequest>(&buffer[..size]) {
                         Ok(request) => request,
                         Err(error) => {
-                            eprintln!("Ignoring malformed discovery datagram from {}: {}", sender, error);
+                            eprintln!(
+                                "Ignoring malformed discovery datagram from {}: {}",
+                                sender, error
+                            );
                             continue;
                         }
                     };
 
+                    eprintln!("DISCOVERY REQUEST from {sender}: {request:?}");
+
                     let response = self.handle_request(request);
+
+                    eprintln!("DISCOVERY RESPONSE to {sender}: {response:?}");
 
                     let bytes = bincode::serialize(&response)
                         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;

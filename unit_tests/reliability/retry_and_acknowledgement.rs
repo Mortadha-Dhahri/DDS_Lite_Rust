@@ -1495,3 +1495,97 @@
             "the acknowledged sequence's retry state must be removed"
         );
     }
+#[test]
+    fn publisher_heartbeat_is_handled_without_panicking() {
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let topic = Topic::new("test/heartbeat", "TestMessage");
+        let mut publisher = Publisher::<TestMessage>::new(
+            topic,
+            discovery,
+            transport,
+            QosPolicy::new(10, Reliability::BestEffort),
+        )
+        .unwrap();
+
+        publisher
+            .handle_control_message(
+                ControlMessage::Heartbeat { participant_id: 42 },
+                "127.0.0.1:7402".parse().unwrap(),
+            )
+            .expect("heartbeat must be handled without panic");
+    }
+#[test]
+    fn send_failure_for_one_subscriber_does_not_block_other_subscribers() {
+        use std::thread;
+
+        let mut server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let server_address = server.local_addr().unwrap();
+        thread::spawn(move || server.run().unwrap());
+
+        let topic = Topic::new("test/fanout-after-send-error", "TestMessage");
+        let publisher_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let publisher_address = publisher_transport.local_addr().unwrap();
+        let good_subscriber = UdpSocket::bind("127.0.0.1:0").unwrap();
+        good_subscriber
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let good_address = good_subscriber.local_addr().unwrap();
+        let bad_address: std::net::SocketAddr = "[::1]:7999".parse().unwrap();
+
+        let discovery =
+            NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), server_address).unwrap();
+        let publisher_participant = Participant::new(101, publisher_address);
+        let bad_participant = Participant::new(102, bad_address);
+        let good_participant = Participant::new(103, good_address);
+
+        for participant in [&publisher_participant, &bad_participant, &good_participant] {
+            discovery.register_participant(participant).unwrap();
+        }
+        discovery
+            .register_endpoint(
+                publisher_participant.id(),
+                topic.name(),
+                EndpointKind::Publisher,
+            )
+            .unwrap();
+        for participant in [&bad_participant, &good_participant] {
+            discovery
+                .register_endpoint(
+                    participant.id(),
+                    topic.name(),
+                    EndpointKind::Subscriber,
+                )
+                .unwrap();
+        }
+
+        let mut publisher = Publisher::<TestMessage>::new(
+            topic,
+            discovery,
+            publisher_transport,
+            QosPolicy::new(10, Reliability::BestEffort),
+        )
+        .unwrap();
+
+        // IPv4 transport cannot send to the IPv6 endpoint; publish reports the
+        // first error, but only after trying the reachable IPv4 subscriber.
+        assert!(publisher.publish(&TestMessage { value: 77 }).is_err());
+
+        let mut buffer = [0u8; 65_535];
+        let (size, _) = good_subscriber
+            .recv_from(&mut buffer)
+            .expect("the reachable subscriber must still receive the sample");
+        match decode_network_message(&buffer[..size]).unwrap() {
+            NetworkMessage::Data(message) => {
+                assert_eq!(message.sequence_number, 1);
+                let payload: TestMessage = deserialize_payload(&message.payload).unwrap();
+                assert_eq!(payload.value, 77);
+            }
+            other => panic!("expected data message, got {other:?}"),
+        }
+    }
+

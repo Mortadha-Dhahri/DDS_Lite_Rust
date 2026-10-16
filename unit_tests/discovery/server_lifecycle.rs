@@ -134,3 +134,29 @@
         assert_eq!(publishers.len(), 1);
         assert_eq!(publishers[0].participant_id, 2);
     }
+#[test]
+    fn malformed_datagram_does_not_stop_discovery_server() {
+        use std::net::UdpSocket;
+
+        let mut server = test_server(Duration::from_secs(2));
+        let server_address = server.local_addr().unwrap();
+        thread::spawn(move || server.run().unwrap());
+
+        let client = UdpSocket::bind("127.0.0.1:0").unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+
+        client.send_to(&[0xff, 0x00, 0x01], server_address).unwrap();
+
+        let request = DiscoveryRequest::RegisterParticipant {
+            participant_id: 987,
+            address: "127.0.0.1:7987".parse().unwrap(),
+        };
+        let bytes = bincode::serialize(&request).unwrap();
+        client.send_to(&bytes, server_address).unwrap();
+
+        let mut buffer = [0u8; 1024];
+        let (size, _) = client.recv_from(&mut buffer).unwrap();
+        let response: DiscoveryResponse = bincode::deserialize(&buffer[..size]).unwrap();
+        assert!(matches!(response, DiscoveryResponse::Registered));
+    }
+

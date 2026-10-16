@@ -29,6 +29,16 @@ This document describes the behavior covered by the current implementation and t
 - A duplicate reliable sample is acknowledged but not delivered to the application a second time.
 - Missing sequence numbers are tracked so the receiver can identify gaps and recognize when missing samples arrive.
 
+## Defensive behavior
+
+- A publisher accepts heartbeat control messages without panicking.
+- The discovery server ignores malformed request datagrams and continues serving later requests.
+- A subscriber validates the payload before updating sequence state; a corrupt payload is ignored and is not ACKed.
+- Sequence-gap tracking retains at most 128 missing sequence numbers and sends at most that many in one NACK. This bounds allocation and control-datagram size, but a larger gap is only partially requested for retransmission.
+- Publisher fan-out attempts every discovered subscriber even when an individual UDP send fails, then returns the first send error.
+- Local discovery registration is idempotent for participant IDs and for the participant/topic/kind endpoint tuple.
+- If a subscriber sees sequence 1 from an address whose high-water mark is greater than 1, it resets that address's tracker. This handles the common restart case without changing the current wire format, but it is a heuristic: a delayed old sequence-1 packet could also be mistaken for a restart. An explicit publisher-session ID is the stronger long-term protocol fix.
+
 ## Scope and limitations
 
 The current implementation is a learning-focused DDS-inspired middleware. These tests cover selected reliability invariants, not every failure mode or interoperability requirement of DDS/RTPS. In particular, successful unit tests do not prove lossless delivery under arbitrary packet loss, process crashes, or network partitions.

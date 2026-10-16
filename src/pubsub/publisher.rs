@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use crate::qos::sequence::MAX_TRACKED_GAP;
+
 use crate::{
     ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
     NetworkMessage, Participant, QosPolicy, Reliability, Subscriber, Topic, Transport,
@@ -98,21 +100,35 @@ where
         let bytes = encode_network_message(&network_message)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
+        let mut first_send_error: Option<io::Error> = None;
         for subscriber in subscribers {
-            self.transport.send(&bytes, subscriber.address)?;
-
-            if self.is_reliable() {
-                self.pending_acks
-                    .entry(subscriber.address)
-                    .or_default()
-                    .insert(
-                        sequence_number,
-                        PendingAck {
-                            sent_at: Instant::now(),
-                            retransmission_attempts: 0,
-                        },
-                    );
+            match self.transport.send(&bytes, subscriber.address) {
+                Ok(_) => {
+                    if self.is_reliable() {
+                        self.pending_acks
+                            .entry(subscriber.address)
+                            .or_default()
+                            .insert(
+                                sequence_number,
+                                PendingAck {
+                                    sent_at: Instant::now(),
+                                    retransmission_attempts: 0,
+                                },
+                            );
+                    }
+                }
+                Err(error) => {
+                    // Continue fan-out even if one destination fails. Preserve the
+                    // first error and return it after attempting all subscribers.
+                    if first_send_error.is_none() {
+                        first_send_error = Some(error);
+                    }
+                }
             }
+        }
+
+        if let Some(error) = first_send_error {
+            return Err(error);
         }
 
         Ok(())
@@ -197,7 +213,11 @@ where
                     }
                 }
             }
-            ControlMessage::Heartbeat { .. } => todo!(),
+            ControlMessage::Heartbeat { participant_id } => {
+                // A heartbeat is valid traffic on this UDP socket; it must not panic
+                // the publisher control loop.
+                println!("Received heartbeat from participant {} at {}.", participant_id, sender);
+            }
         }
 
         Ok(())
@@ -328,7 +348,7 @@ where
             sender, missing_sequences
         );
 
-        for sequence_number in missing_sequences {
+        for sequence_number in missing_sequences.into_iter().take(MAX_TRACKED_GAP as usize) {
             if self.history.find(sequence_number).is_none() {
                 continue;
             }

@@ -191,3 +191,84 @@
 
         assert_eq!(values, vec![10, 20]);
     }
+#[test]
+    fn corrupt_payload_does_not_advance_sequence_tracker() {
+        let topic = Topic::new("test/corrupt-payload", "TestPayload");
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut subscriber = Subscriber::<TestPayload>::new(
+            topic.clone(),
+            discovery,
+            transport,
+            QosPolicy::new(10, crate::Reliability::Reliable),
+        )
+        .unwrap();
+        let sender: SocketAddr = "127.0.0.1:7400".parse().unwrap();
+
+        let result = subscriber
+            .handle_data_message(
+                crate::WireMessage {
+                    sequence_number: 7,
+                    topic: topic.name().to_string(),
+                    type_name: topic.type_name().to_string(),
+                    payload: vec![0xff, 0x00],
+                },
+                sender,
+            )
+            .unwrap();
+
+        assert!(result.is_none());
+        assert_eq!(
+            subscriber.sequence_trackers.get(&sender).map(|tracker| tracker.last_sequence()),
+            None,
+            "a corrupt payload must not create or advance sequence state"
+        );
+    }
+
+    #[test]
+    fn sequence_one_after_high_water_mark_starts_a_new_stream() {
+        let topic = Topic::new("test/publisher-restart", "TestPayload");
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut subscriber = Subscriber::<TestPayload>::new(
+            topic.clone(),
+            discovery,
+            transport,
+            QosPolicy::new(10, crate::Reliability::BestEffort),
+        )
+        .unwrap();
+        let sender: SocketAddr = "127.0.0.1:7401".parse().unwrap();
+        let payload = crate::serialize_payload(&TestPayload { value: 1 }).unwrap();
+
+        let high = crate::WireMessage {
+            sequence_number: 8,
+            topic: topic.name().to_string(),
+            type_name: topic.type_name().to_string(),
+            payload: payload.clone(),
+        };
+        assert!(subscriber.handle_data_message(high, sender).unwrap().is_some());
+
+        let restarted = crate::WireMessage {
+            sequence_number: 1,
+            topic: topic.name().to_string(),
+            type_name: topic.type_name().to_string(),
+            payload,
+        };
+        assert!(
+            subscriber.handle_data_message(restarted, sender).unwrap().is_some(),
+            "sequence 1 after a higher sequence should be accepted as a restarted stream"
+        );
+        assert_eq!(
+            subscriber.sequence_trackers.get(&sender).unwrap().last_sequence(),
+            1
+        );
+    }
+

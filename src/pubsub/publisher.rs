@@ -1872,4 +1872,70 @@ mod tests {
             "NACK unexpectedly retransmitted a sample after the retry budget was exhausted"
         );
     }
+    #[test]
+    fn acknowledgement_clears_retry_state_after_pending_ack_is_removed() {
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/ack-retry-cleanup", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        let subscriber = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let subscriber_address = subscriber.local_addr().unwrap();
+
+        // Simulate an exhausted retry budget whose pending ACK was already removed.
+        publisher
+            .nack_attempts
+            .entry(subscriber_address)
+            .or_default()
+            .insert(1, MAX_RETRANSMISSIONS);
+
+        // Sequence 1 has no pending ACK.
+        assert!(
+            publisher
+                .pending_acks
+                .get(&subscriber_address)
+                .and_then(|sequences| sequences.get(&1))
+                .is_none(),
+            "sequence 1 must not have a pending ACK"
+        );
+
+        assert_eq!(
+            publisher.nack_attempts[&subscriber_address][&1],
+            MAX_RETRANSMISSIONS
+        );
+
+        // An ACK from the same subscriber should clear the retry state.
+        publisher
+            .handle_control_message(
+                ControlMessage::Ack {
+                    topic: topic.name().to_string(),
+                    sequence_number: 1,
+                },
+                subscriber_address,
+            )
+            .unwrap();
+
+        assert!(
+            !publisher.nack_attempts.contains_key(&subscriber_address),
+            "the subscriber's retry-state entry should be removed when empty"
+        );
+
+        assert!(
+            publisher
+                .nack_attempts
+                .get(&subscriber_address)
+                .and_then(|sequences| sequences.get(&1))
+                .is_none(),
+            "the acknowledged sequence's retry state must be removed"
+        );
+    }
 }

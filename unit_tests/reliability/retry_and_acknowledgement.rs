@@ -1495,3 +1495,28 @@
             "the acknowledged sequence's retry state must be removed"
         );
     }
+#[test]
+    fn publisher_heartbeat_is_handled_without_panicking() {
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let topic = Topic::new("test/heartbeat", "TestMessage");
+        let mut publisher = Publisher::<TestMessage>::new(
+            topic,
+            discovery,
+            transport,
+            QosPolicy::new(10, Reliability::BestEffort),
+        )
+        .unwrap();
+
+        publisher
+            .handle_control_message(
+                ControlMessage::Heartbeat { participant_id: 42 },
+                "127.0.0.1:7402".parse().unwrap(),
+            )
+            .expect("heartbeat must be handled without panic");
+    }
+

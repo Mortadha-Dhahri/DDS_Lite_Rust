@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use crate::qos::sequence::MAX_TRACKED_GAP;
+
 use crate::{
     ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
     NetworkMessage, Participant, QosPolicy, Reliability, Subscriber, Topic, Transport,
@@ -346,7 +348,7 @@ where
             sender, missing_sequences
         );
 
-        for sequence_number in missing_sequences {
+        for sequence_number in missing_sequences.into_iter().take(MAX_TRACKED_GAP as usize) {
             if self.history.find(sequence_number).is_none() {
                 continue;
             }

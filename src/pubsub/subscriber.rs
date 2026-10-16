@@ -156,14 +156,28 @@ where
             return Ok(None);
         }
 
+        // Decode before touching sequence state. A corrupt payload is ignored and
+        // must not advance the high-water mark or trigger an ACK.
+        let data = match deserialize_payload::<T>(&message.payload) {
+            Ok(data) => data,
+            Err(error) => {
+                println!("Ignoring corrupt payload from {}: {}", sender, error);
+                return Ok(None);
+            }
+        };
+
         let sequence_number = message.sequence_number;
 
+        // A restarted publisher at the same UDP address begins a new stream at 1.
+        // Resetting here is a compatibility heuristic until the wire protocol carries
+        // an explicit publisher-session identifier.
+        let tracker = self.sequence_trackers.entry(sender).or_default();
+        if sequence_number == 1 && tracker.last_sequence() > 1 {
+            tracker.reset();
+        }
+
         // Each publisher has an independent sequence-number stream.
-        let sequence_event = self
-            .sequence_trackers
-            .entry(sender)
-            .or_default()
-            .observe(sequence_number);
+        let sequence_event = tracker.observe(sequence_number);
         match sequence_event {
             SequenceEvent::First => {}
             SequenceEvent::Contiguous => {}
@@ -181,9 +195,6 @@ where
                 return Ok(None);
             }
         }
-
-        let data = deserialize_payload::<T>(&message.payload)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         if self.qos.reliability() == crate::Reliability::Reliable {
             self.send_ack(&sender, sequence_number)?;

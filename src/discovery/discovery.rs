@@ -39,11 +39,27 @@ impl LocalDiscovery {
 
 impl Discovery for LocalDiscovery {
     fn register_endpoint(&mut self, endpoint: Endpoint) {
-        self.endpoints.push(endpoint);
+        let already_registered = self.endpoints.iter().any(|registered| {
+            registered.participant_id == endpoint.participant_id
+                && registered.topic == endpoint.topic
+                && registered.kind == endpoint.kind
+        });
+
+        if !already_registered {
+            self.endpoints.push(endpoint);
+        }
     }
 
     fn register_participant(&mut self, participant: Participant) {
-        self.participants.push(participant);
+        if let Some(registered) = self
+            .participants
+            .iter_mut()
+            .find(|registered| registered.id() == participant.id())
+        {
+            *registered = participant;
+        } else {
+            self.participants.push(participant);
+        }
     }
 
     fn lookup(&self, topic: &str, kind: EndpointKind) -> Vec<Endpoint> {

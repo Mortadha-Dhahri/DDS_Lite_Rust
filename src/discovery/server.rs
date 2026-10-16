@@ -111,8 +111,13 @@ impl DiscoveryServer {
                 Ok((size, sender)) => {
                     self.expire_participants();
 
-                    let request = bincode::deserialize::<DiscoveryRequest>(&buffer[..size])
-                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                    let request = match bincode::deserialize::<DiscoveryRequest>(&buffer[..size]) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            eprintln!("Ignoring malformed discovery datagram from {}: {}", sender, error);
+                            continue;
+                        }
+                    };
 
                     let response = self.handle_request(request);
 

@@ -76,6 +76,12 @@ impl SequenceTracker {
         }
     }
 
+    /// Reset sequence state when the same endpoint starts a new stream at sequence 1.
+    pub fn reset(&mut self) {
+        self.last_sequence = 0;
+        self.missing_sequences.clear();
+    }
+
     pub fn last_sequence(&self) -> u64 {
         self.last_sequence
     }

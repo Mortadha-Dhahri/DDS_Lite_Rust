@@ -27,6 +27,7 @@ pub struct Publisher<T> {
     history: History<T>,
     next_sequence_number: u64,
     pending_acks: HashMap<SocketAddr, HashMap<u64, PendingAck>>,
+    nack_attempts: HashMap<SocketAddr, HashMap<u64, u8>>,
     last_subscriber_refresh: Option<Instant>,
     subscriber_refresh_interval: Duration,
     subscribers: Option<Vec<DiscoveredEndpoint>>,
@@ -51,6 +52,7 @@ where
             history: History::new(qos.history_depth()),
             next_sequence_number: 1,
             pending_acks: HashMap::new(),
+            nack_attempts: HashMap::new(),
             subscribers: None,
             last_subscriber_refresh: None,
             subscriber_refresh_interval: Duration::from_secs(1),
@@ -187,6 +189,13 @@ where
                         self.pending_acks.remove(&sender);
                     }
                 }
+                if let Some(sequences) = self.nack_attempts.get_mut(&sender) {
+                    sequences.remove(&sequence_number);
+
+                    if sequences.is_empty() {
+                        self.nack_attempts.remove(&sender);
+                    }
+                }
             }
             ControlMessage::Heartbeat { .. } => todo!(),
         }
@@ -301,16 +310,12 @@ where
     }
 
     fn handle_nack(
-        &self,
+        &mut self,
         topic: String,
         missing_sequences: Vec<u64>,
         sender: SocketAddr,
     ) -> io::Result<()> {
-        if topic != self.topic.name() {
-            return Ok(());
-        }
-
-        if !self.is_reliable() {
+        if topic != self.topic.name() || !self.is_reliable() {
             return Ok(());
         }
 
@@ -320,7 +325,50 @@ where
         );
 
         for sequence_number in missing_sequences {
-            self.retransmit(sequence_number, sender)?;
+            if self.history.find(sequence_number).is_none() {
+                continue;
+            }
+
+            let pending_attempts = self
+                .pending_acks
+                .get(&sender)
+                .and_then(|pending| pending.get(&sequence_number))
+                .map(|ack| ack.retransmission_attempts);
+
+            if let Some(attempts) = pending_attempts {
+                if attempts >= MAX_RETRANSMISSIONS {
+                    continue;
+                }
+
+                self.retransmit(sequence_number, sender)?;
+
+                if let Some(ack) = self
+                    .pending_acks
+                    .get_mut(&sender)
+                    .and_then(|pending| pending.get_mut(&sequence_number))
+                {
+                    ack.retransmission_attempts += 1;
+                    ack.sent_at = Instant::now();
+                }
+            } else {
+                let attempts = self
+                    .nack_attempts
+                    .get(&sender)
+                    .and_then(|sequences| sequences.get(&sequence_number))
+                    .copied()
+                    .unwrap_or(0);
+
+                if attempts >= MAX_RETRANSMISSIONS {
+                    continue;
+                }
+
+                self.retransmit(sequence_number, sender)?;
+
+                self.nack_attempts
+                    .entry(sender)
+                    .or_default()
+                    .insert(sequence_number, attempts + 1);
+            }
         }
 
         Ok(())
@@ -1522,5 +1570,235 @@ mod tests {
         );
 
         assert_eq!(publisher_address.port() != 0, true);
+    }
+    #[test]
+    fn publishing_and_acknowledgement_clear_pending_state() {
+        use std::thread;
+
+        // Start an isolated discovery server on an available port.
+        let mut server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let server_address = server.local_addr().unwrap();
+
+        thread::spawn(move || {
+            server.run().unwrap();
+        });
+
+        let topic = Topic::new("test/ack-lifecycle", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        // Create the actual UDP transports.
+        let publisher_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let publisher_address = publisher_transport.local_addr().unwrap();
+        let subscriber_address = subscriber_transport.local_addr().unwrap();
+
+        // Create discovery clients.
+        let publisher_discovery =
+            NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), server_address).unwrap();
+        let subscriber_discovery =
+            NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), server_address).unwrap();
+
+        // Register both participants and their endpoints.
+        let publisher_participant = Participant::new(1, publisher_address);
+        let subscriber_participant = Participant::new(2, subscriber_address);
+
+        publisher_discovery
+            .register_participant(&publisher_participant)
+            .unwrap();
+        publisher_discovery
+            .register_participant(&subscriber_participant)
+            .unwrap();
+
+        publisher_discovery
+            .register_endpoint(
+                publisher_participant.id(),
+                topic.name(),
+                EndpointKind::Publisher,
+            )
+            .unwrap();
+        publisher_discovery
+            .register_endpoint(
+                subscriber_participant.id(),
+                topic.name(),
+                EndpointKind::Subscriber,
+            )
+            .unwrap();
+
+        let mut publisher = Publisher::<TestMessage>::new(
+            topic.clone(),
+            publisher_discovery,
+            publisher_transport,
+            qos.clone(),
+        )
+        .unwrap();
+
+        let mut subscriber =
+            Subscriber::<TestMessage>::new(topic, subscriber_discovery, subscriber_transport, qos)
+                .unwrap();
+
+        publisher.set_nonblocking(true).unwrap();
+        subscriber.set_nonblocking(true).unwrap();
+
+        // 1. Publish through the real publisher API.
+        publisher.publish(&TestMessage { value: 42 }).unwrap();
+
+        // A reliable publication should create one pending ACK.
+        assert_eq!(
+            publisher.pending_ack_count(),
+            1,
+            "publication should create a pending ACK"
+        );
+
+        // 2. Wait for the subscriber to receive the sample.
+        let deadline = Instant::now() + Duration::from_secs(1);
+
+        let received = loop {
+            if let Some(message) = subscriber.try_receive().unwrap() {
+                break Some(message);
+            }
+
+            if Instant::now() >= deadline {
+                break None;
+            }
+
+            thread::yield_now();
+        };
+
+        assert_eq!(
+            received,
+            Some(TestMessage { value: 42 }),
+            "subscriber should receive the published sample"
+        );
+
+        // 3. The subscriber has sent an ACK over UDP.
+        // Process it through the publisher's real control-message path.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut ack_processed = false;
+
+        while Instant::now() < deadline {
+            if publisher.try_receive_control().unwrap() {
+                ack_processed = true;
+                break;
+            }
+
+            thread::yield_now();
+        }
+
+        assert!(
+            ack_processed,
+            "publisher should process the subscriber's ACK"
+        );
+
+        // 4. The ACK must clear the corresponding pending state.
+        assert_eq!(
+            publisher.pending_ack_count(),
+            0,
+            "acknowledged publication should no longer be pending"
+        );
+    }
+    #[test]
+    fn nack_retransmissions_respect_maximum_attempts() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(200)))
+            .unwrap();
+
+        let receiver_address = receiver.local_addr().unwrap();
+
+        let discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let topic = Topic::new("test/nack-retry-limit", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let mut publisher =
+            Publisher::<TestMessage>::new(topic.clone(), discovery, transport, qos).unwrap();
+
+        publisher.history.push(1, TestMessage { value: 42 });
+
+        publisher
+            .pending_acks
+            .entry(receiver_address)
+            .or_default()
+            .insert(
+                1,
+                PendingAck {
+                    sent_at: Instant::now(),
+                    retransmission_attempts: 0,
+                },
+            );
+
+        for attempt in 1..=MAX_RETRANSMISSIONS {
+            publisher
+                .handle_control_message(
+                    ControlMessage::Nack {
+                        topic: topic.name().to_string(),
+                        missing_sequences: vec![1],
+                    },
+                    receiver_address,
+                )
+                .unwrap();
+
+            let mut buffer = [0u8; 65_535];
+            let (size, _) = receiver
+                .recv_from(&mut buffer)
+                .expect("expected NACK-triggered retransmission");
+
+            match decode_network_message(&buffer[..size]).unwrap() {
+                NetworkMessage::Data(message) => {
+                    assert_eq!(message.sequence_number, 1);
+                }
+                NetworkMessage::Control(_) => {
+                    panic!("Expected a retransmitted data message");
+                }
+            }
+
+            let pending = publisher
+                .pending_acks
+                .get(&receiver_address)
+                .and_then(|entries| entries.get(&1))
+                .expect("pending ACK should remain until retries are exhausted");
+
+            assert_eq!(
+                pending.retransmission_attempts, attempt,
+                "NACK retransmissions must update the retry counter"
+            );
+        }
+
+        // A NACK must not trigger another retransmission after the limit.
+        publisher
+            .handle_control_message(
+                ControlMessage::Nack {
+                    topic: topic.name().to_string(),
+                    missing_sequences: vec![1],
+                },
+                receiver_address,
+            )
+            .unwrap();
+
+        let mut buffer = [0u8; 65_535];
+        let result = receiver.recv_from(&mut buffer);
+
+        assert!(
+            matches!(
+                result,
+                Err(ref error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut
+            ),
+            "NACK caused an unexpected retransmission after the retry limit"
+        );
+
+        assert_eq!(
+            publisher.pending_ack_count(),
+            1,
+            "the retry limit should not itself remove the pending ACK"
+        );
     }
 }

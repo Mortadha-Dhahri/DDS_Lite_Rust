@@ -33,56 +33,5 @@ pub fn decode_control_message(bytes: &[u8]) -> Result<ControlMessage, bincode::E
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ControlMessage, decode_control_message, encode_control_message};
-
-    #[test]
-    fn nack_round_trip() {
-        let message = ControlMessage::Nack {
-            topic: "vehicle/state".to_string(),
-            missing_sequences: vec![3, 4, 5],
-        };
-
-        let encoded = encode_control_message(&message).unwrap();
-
-        let decoded = decode_control_message(&encoded).unwrap();
-
-        assert_eq!(decoded, message);
-    }
-
-    #[test]
-    fn empty_nack_round_trip() {
-        let message = ControlMessage::Nack {
-            topic: "vehicle/state".to_string(),
-            missing_sequences: Vec::new(),
-        };
-
-        let encoded = encode_control_message(&message).unwrap();
-
-        let decoded = decode_control_message(&encoded).unwrap();
-
-        assert_eq!(decoded, message);
-    }
-    #[test]
-    fn ack_round_trip() {
-        let message = ControlMessage::Ack {
-            topic: "vehicle/state".to_string(),
-            sequence_number: 42,
-        };
-
-        let encoded = encode_control_message(&message).unwrap();
-
-        let decoded = decode_control_message(&encoded).unwrap();
-
-        assert_eq!(decoded, message);
-    }
-    #[test]
-    fn heartbeat_round_trip() {
-        let message = ControlMessage::Heartbeat { participant_id: 42 };
-
-        let encoded = encode_control_message(&message).unwrap();
-        let decoded = decode_control_message(&encoded).unwrap();
-
-        assert_eq!(decoded, message);
-    }
-}
+#[path = "../../unit_tests/serialization/control_message_roundtrip.rs"]
+mod control_message_tests;

@@ -543,3 +543,103 @@ fn reliable_process_reliability_retransmits_expired_ack() {
 
     assert!(second_size > 0);
 }
+#[test]
+fn late_ack_clears_delivery_failure_after_retry_exhaustion() {
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    receiver
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+
+    let receiver_address = receiver.local_addr().unwrap();
+    let publisher_address = "127.0.0.1:7104".parse().unwrap();
+    let discovery_server_address = "127.0.0.1:6102".parse().unwrap();
+
+    thread::spawn(move || {
+        let mut server = DiscoveryServer::bind(discovery_server_address).unwrap();
+        server.run().unwrap();
+    });
+
+    thread::sleep(Duration::from_millis(100));
+
+    let publisher_participant = Participant::new(5, publisher_address);
+    let discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address).unwrap();
+
+    discovery
+        .register_participant(&publisher_participant)
+        .unwrap();
+
+    let topic = Topic::new("test/late-ack", "TestMessage");
+
+    discovery
+        .register_endpoint(
+            publisher_participant.id(),
+            topic.name(),
+            EndpointKind::Publisher,
+        )
+        .unwrap();
+
+    let subscriber_participant = Participant::new(6, receiver_address);
+
+    discovery
+        .register_participant(&subscriber_participant)
+        .unwrap();
+
+    discovery
+        .register_endpoint(
+            subscriber_participant.id(),
+            topic.name(),
+            EndpointKind::Subscriber,
+        )
+        .unwrap();
+
+    let transport = UdpTransport::bind(publisher_address).unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    publisher.publish(&TestMessage { value: 123 }).unwrap();
+
+    // Consume the initial DATA packet.
+    let mut buffer = vec![0u8; 65_535];
+    receiver.recv_from(&mut buffer).unwrap();
+
+    // Allow each retransmission to become eligible, then consume it.
+    for _ in 0..3 {
+        thread::sleep(Duration::from_millis(20));
+
+        publisher
+            .retransmit_expired_acknowledgements(Duration::from_millis(10))
+            .unwrap();
+
+        receiver.recv_from(&mut buffer).unwrap();
+    }
+
+    // The next expired check exhausts retries and records the failure.
+    thread::sleep(Duration::from_millis(20));
+
+    publisher
+        .retransmit_expired_acknowledgements(Duration::from_millis(10))
+        .unwrap();
+
+    assert_eq!(publisher.pending_ack_count(), 0);
+    assert!(publisher.delivery_failed(receiver_address, 1));
+
+    // A late ACK must clear the failure state.
+    publisher
+        .handle_control_message(
+            ControlMessage::Ack {
+                topic: topic.name().to_string(),
+                sequence_number: 1,
+            },
+            receiver_address,
+        )
+        .unwrap();
+
+    assert!(!publisher.delivery_failed(receiver_address, 1));
+    assert_eq!(publisher.pending_ack_count(), 0);
+}

@@ -6,13 +6,13 @@ Unit tests live here and are grouped by **the behavior they verify**, not by the
 
 | Test file | Expected behavior covered |
 |---|---|
-| `reliability/retry_and_acknowledgement.rs` | Reliable publishers track pending ACKs per subscriber and sequence; ACKs only clear the matching subscriber/sequence state; unknown, late, and duplicate ACKs do not corrupt other state; NACKs trigger eligible retransmissions; retries stop at the configured limit; unavailable history entries do not block other recoverable samples; best-effort mode does not track reliable ACK state. |
-| `reliability/receive_semantics.rs` | Subscribers handle control messages, ACK reliable duplicate data without redelivering it, track sequence state independently per publisher, and update participant liveliness on heartbeats. |
-| `discovery/endpoint_registry.rs` | Local discovery registers and looks up endpoints by topic and endpoint kind, and participant cleanup does not remove unrelated endpoints. |
-| `discovery/server_lifecycle.rs` | The discovery server registers participants/endpoints and removes expired or unregistered participant state without affecting other participants. |
+| `reliability/retry_and_acknowledgement.rs` | Reliable publishers track pending ACKs per subscriber and sequence; ACKs only clear the matching subscriber/sequence state; unknown, late, and duplicate ACKs do not corrupt other state; NACKs trigger eligible retransmissions; retries stop at the configured limit; unavailable history entries do not block other recoverable samples; best-effort mode does not track reliable ACK state; heartbeat control messages do not panic; fan-out continues after an individual send error. |
+| `reliability/receive_semantics.rs` | Subscribers handle control messages, ACK reliable duplicate data without redelivering it, track sequence state independently per publisher, update participant liveliness on heartbeats, ignore corrupt payloads without advancing sequence state, and reset tracking when sequence 1 indicates a restarted stream. |
+| `discovery/endpoint_registry.rs` | Local discovery registers and looks up endpoints by topic and endpoint kind, makes duplicate registrations idempotent, and participant cleanup does not remove unrelated endpoints. |
+| `discovery/server_lifecycle.rs` | The discovery server registers participants/endpoints, removes expired or unregistered participant state without affecting other participants, and survives malformed datagrams. |
 | `qos/history_capacity.rs` | History respects its configured depth and evicts the oldest entries; evicted sequence numbers are no longer available for retransmission. |
 | `qos/liveliness_expiry.rs` | Observed participants remain live until their timeout expires, after which expired participant IDs are reported. |
-| `qos/sequence_tracking.rs` | Sequence tracking distinguishes new, duplicate, and out-of-order samples and reports gaps until missing sequence numbers arrive. |
+| `qos/sequence_tracking.rs` | Sequence tracking distinguishes new, duplicate, and out-of-order samples, reports gaps until missing sequence numbers arrive, and bounds gap state and NACK lists to 128 entries. |
 | `qos/policy_defaults.rs` | QoS policy accessors expose the configured history depth, reliability mode, and liveliness timeout. |
 | `serialization/control_message_roundtrip.rs` | Control messages can be encoded and decoded without changing their variant or fields. |
 

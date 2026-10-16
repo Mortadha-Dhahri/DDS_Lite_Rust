@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use crate::{
     ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
-    NetworkMessage, Participant, QosPolicy, Reliability, Topic, Transport, UdpTransport,
-    WireMessage, decode_network_message, deserialize_payload, encode_network_message,
+    NetworkMessage, Participant, QosPolicy, Reliability, Subscriber, Topic, Transport,
+    UdpTransport, WireMessage, decode_network_message, deserialize_payload, encode_network_message,
     serialize_payload,
 };
 
@@ -400,6 +400,27 @@ mod tests {
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
     struct TestMessage {
         value: u32,
+    }
+
+    fn send_sample(
+        transport: &UdpTransport,
+        topic: &Topic,
+        destination: std::net::SocketAddr,
+        sequence_number: u64,
+        value: u32,
+    ) {
+        let payload = serialize_payload(&TestMessage { value }).unwrap();
+
+        let message = NetworkMessage::Data(WireMessage {
+            sequence_number,
+            topic: topic.name().to_string(),
+            type_name: topic.type_name().to_string(),
+            payload,
+        });
+
+        let bytes = encode_network_message(&message).unwrap();
+
+        transport.send(&bytes, destination).unwrap();
     }
     #[test]
     fn expired_acknowledgement_is_retransmitted() {
@@ -1362,5 +1383,144 @@ mod tests {
         assert_eq!(pending_b.retransmission_attempts, 1);
         assert_eq!(publisher.pending_ack_count(), 1);
         assert!(!publisher.pending_acks.contains_key(&address_a));
+    }
+
+    #[test]
+    fn reliable_delivery_recovers_a_dropped_sample() {
+        let topic = Topic::new("test/packet-loss-recovery", "TestMessage");
+        let qos = QosPolicy::new(10, Reliability::Reliable);
+
+        let publisher_discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let publisher_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let mut publisher = Publisher::<TestMessage>::new(
+            topic.clone(),
+            publisher_discovery,
+            publisher_transport,
+            qos.clone(),
+        )
+        .unwrap();
+
+        let subscriber_discovery = NetworkDiscovery::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6000".parse().unwrap(),
+        )
+        .unwrap();
+
+        let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+
+        let mut subscriber = Subscriber::<TestMessage>::new(
+            topic.clone(),
+            subscriber_discovery,
+            subscriber_transport,
+            qos,
+        )
+        .unwrap();
+
+        // Nonblocking reads let the test control exactly when packets are processed.
+        subscriber.set_nonblocking(true).unwrap();
+        publisher.set_nonblocking(true).unwrap();
+
+        //let publisher_address = publisher.local_addr().unwrap();
+        let subscriber_address = subscriber.local_addr().unwrap();
+
+        // Retain all three samples so sequence 2 can be retransmitted.
+        for (sequence, value) in [(1, 10), (2, 20), (3, 30)] {
+            publisher.history.push(sequence, TestMessage { value });
+        }
+
+        send_sample(&publisher.transport, &topic, subscriber_address, 1, 10);
+        send_sample(&publisher.transport, &topic, subscriber_address, 3, 30);
+
+        let received = subscriber
+            .try_receive()
+            .expect("subscriber should process sequence 1");
+
+        assert_eq!(
+            received,
+            Some(TestMessage { value: 10 }),
+            "subscriber should deliver sequence 1"
+        );
+
+        let publisher_address = publisher.local_addr().unwrap();
+        println!("Publisher transport: {publisher_address}");
+        println!("Subscriber transport: {subscriber_address}");
+
+        let received_control = publisher
+            .try_receive_control()
+            .expect("publisher should process the ACK");
+
+        println!("Publisher processed control message: {received_control}");
+
+        assert!(
+            received_control,
+            "publisher should receive the ACK for sequence 1"
+        );
+
+        // 2. Simulate packet loss: sequence 2 is never sent.
+        // 3. Sequence 3 arrives, exposing the missing sequence.
+
+        send_sample(&publisher.transport, &topic, subscriber_address, 3, 30);
+
+        assert_eq!(
+            subscriber.try_receive().unwrap(),
+            Some(TestMessage { value: 30 })
+        );
+
+        // The subscriber sends NACK(2), followed by ACK(3).
+        // The first control packet should be the NACK.
+        assert!(
+            publisher.try_receive_control().unwrap(),
+            "publisher should receive the NACK for sequence 2"
+        );
+
+        // Handling the NACK should retransmit sequence 2.
+        assert!(
+            publisher.try_receive_control().unwrap(),
+            "publisher should receive the ACK for sequence 3"
+        );
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+
+        let recovered = loop {
+            if let Some(message) = subscriber.try_receive().unwrap() {
+                break Some(message);
+            }
+
+            if std::time::Instant::now() >= deadline {
+                break None;
+            }
+
+            std::thread::yield_now();
+        };
+
+        assert_eq!(
+            recovered,
+            Some(TestMessage { value: 20 }),
+            "subscriber should deliver retransmitted sequence 2"
+        );
+
+        // 5. Replay sequence 2 to simulate a duplicate retransmission.
+
+        send_sample(&publisher.transport, &topic, subscriber_address, 2, 20);
+
+        assert_eq!(
+            subscriber.try_receive().unwrap(),
+            None,
+            "a duplicate sample must not be delivered twice"
+        );
+
+        // The subscriber must still ACK the duplicate.
+        assert!(
+            publisher.try_receive_control().unwrap(),
+            "publisher should receive an ACK for the duplicate sequence"
+        );
+
+        assert_eq!(publisher_address.port() != 0, true);
     }
 }

@@ -1,4 +1,4 @@
- # API reference
+# API reference
 
 This reference describes the crate's public surface and the main internal interfaces. It reflects the current implementation, a simplified DDS-inspired middleware rather than a complete DDS/RTPS implementation.
 

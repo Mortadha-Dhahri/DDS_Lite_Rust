@@ -662,12 +662,10 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
 
     let relay_address = relay.local_addr().unwrap();
 
-    let publisher_transport =
-        UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let publisher_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
     let publisher_address = publisher_transport.local_addr().unwrap();
 
-    let subscriber_transport =
-        UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
     let subscriber_address = subscriber_transport.local_addr().unwrap();
 
     // Register the relay as the subscriber endpoint. This ensures the
@@ -676,8 +674,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
     let relay_participant = Participant::new(102, relay_address);
 
     let publisher_discovery =
-        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address)
-            .unwrap();
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address).unwrap();
 
     publisher_discovery
         .register_participant(&publisher_participant)
@@ -706,8 +703,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
         .unwrap();
 
     let subscriber_discovery =
-        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address)
-            .unwrap();
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), discovery_server_address).unwrap();
 
     let mut publisher = Publisher::<TestMessage>::new(
         topic.clone(),
@@ -730,9 +726,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
     // ---------------------------------------------------------------
     // 1. Sequence 1: normal delivery and ACK.
     // ---------------------------------------------------------------
-    publisher
-        .publish(&TestMessage { value: 10 })
-        .unwrap();
+    publisher.publish(&TestMessage { value: 10 }).unwrap();
 
     let (size, sender) = relay.recv_from(&mut buffer).unwrap();
     assert_eq!(sender, publisher_address);
@@ -742,9 +736,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
         _ => panic!("Expected DATA sequence 1"),
     }
 
-    relay
-        .send_to(&buffer[..size], subscriber_address)
-        .unwrap();
+    relay.send_to(&buffer[..size], subscriber_address).unwrap();
 
     assert_eq!(subscriber.receive().unwrap(), TestMessage { value: 10 });
 
@@ -754,8 +746,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
 
     match decode_network_message(&buffer[..size]).unwrap() {
         NetworkMessage::Control(ControlMessage::Ack {
-            sequence_number: 1,
-            ..
+            sequence_number: 1, ..
         }) => {}
         other => panic!("Expected ACK for sequence 1, got {other:?}"),
     }
@@ -768,9 +759,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
     // ---------------------------------------------------------------
     // 2. Sequence 2: deliberately drop the original DATA packet.
     // ---------------------------------------------------------------
-    publisher
-        .publish(&TestMessage { value: 20 })
-        .unwrap();
+    publisher.publish(&TestMessage { value: 20 }).unwrap();
 
     let (size, sender) = relay.recv_from(&mut buffer).unwrap();
     assert_eq!(sender, publisher_address);
@@ -785,9 +774,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
     // ---------------------------------------------------------------
     // 3. Sequence 3: forward it so the subscriber detects the gap.
     // ---------------------------------------------------------------
-    publisher
-        .publish(&TestMessage { value: 30 })
-        .unwrap();
+    publisher.publish(&TestMessage { value: 30 }).unwrap();
 
     let (size, sender) = relay.recv_from(&mut buffer).unwrap();
     assert_eq!(sender, publisher_address);
@@ -797,9 +784,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
         _ => panic!("Expected DATA sequence 3"),
     }
 
-    relay
-        .send_to(&buffer[..size], subscriber_address)
-        .unwrap();
+    relay.send_to(&buffer[..size], subscriber_address).unwrap();
 
     assert_eq!(subscriber.receive().unwrap(), TestMessage { value: 30 });
 
@@ -809,8 +794,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
 
     match decode_network_message(&buffer[..size]).unwrap() {
         NetworkMessage::Control(ControlMessage::Nack {
-            missing_sequences,
-            ..
+            missing_sequences, ..
         }) => assert_eq!(missing_sequences, vec![2]),
         other => panic!("Expected NACK for sequence 2, got {other:?}"),
     }
@@ -827,8 +811,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
 
     match decode_network_message(&buffer[..size]).unwrap() {
         NetworkMessage::Control(ControlMessage::Ack {
-            sequence_number: 3,
-            ..
+            sequence_number: 3, ..
         }) => {}
         other => panic!("Expected ACK for sequence 3, got {other:?}"),
     }
@@ -844,9 +827,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
         _ => panic!("Expected retransmitted DATA sequence 2"),
     }
 
-    relay
-        .send_to(&buffer[..size], subscriber_address)
-        .unwrap();
+    relay.send_to(&buffer[..size], subscriber_address).unwrap();
 
     // The subscriber recognizes sequence 2 as late but valid, delivers
     // it to the application, and ACKs it.
@@ -857,8 +838,7 @@ fn reliable_delivery_recovers_from_a_sequence_gap_end_to_end() {
 
     match decode_network_message(&buffer[..size]).unwrap() {
         NetworkMessage::Control(ControlMessage::Ack {
-            sequence_number: 2,
-            ..
+            sequence_number: 2, ..
         }) => {}
         other => panic!("Expected ACK for sequence 2, got {other:?}"),
     }

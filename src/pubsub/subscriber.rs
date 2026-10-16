@@ -1,7 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 
@@ -11,11 +10,14 @@ use crate::{
     decode_network_message, deserialize_payload,
 };
 
+type PublisherStreamKey = (SocketAddr, String);
 pub struct Subscriber<T> {
     topic: Topic,
     _discovery: NetworkDiscovery,
     transport: UdpTransport,
-    sequence_trackers: HashMap<SocketAddr, SequenceTracker>,
+    sequence_trackers: HashMap<PublisherStreamKey, SequenceTracker>,
+    active_sessions: HashMap<SocketAddr, String>,
+    retired_sessions: HashMap<SocketAddr, HashSet<String>>,
     liveliness: LivelinessTracker,
     qos: QosPolicy,
     _marker: std::marker::PhantomData<T>,
@@ -36,6 +38,8 @@ where
             _discovery: discovery,
             transport,
             sequence_trackers: HashMap::new(),
+            active_sessions: HashMap::new(),
+            retired_sessions: HashMap::new(),
             liveliness: LivelinessTracker::new(qos.liveliness_timeout()),
             qos,
             _marker: std::marker::PhantomData,
@@ -165,16 +169,50 @@ where
                 return Ok(None);
             }
         };
-
         let sequence_number = message.sequence_number;
+        let session_id = message.publisher_session_id;
 
-        // A restarted publisher at the same UDP address begins a new stream at 1.
-        // Resetting here is a compatibility heuristic until the wire protocol carries
-        // an explicit publisher-session identifier.
-        let tracker = self.sequence_trackers.entry(sender).or_default();
-        if sequence_number == 1 && tracker.last_sequence() > 1 {
-            tracker.reset();
+        // Ignore packets from sessions that have already been replaced.
+        // Do this before changing the active session or sequence state.
+        if self
+            .retired_sessions
+            .get(&sender)
+            .is_some_and(|sessions| sessions.contains(&session_id))
+        {
+            println!(
+                "Ignoring packet from retired publisher session {} at {}",
+                session_id, sender
+            );
+            return Ok(None);
         }
+
+        // A previously unseen session becomes active. If another session was
+        // active at this address, retire it so delayed packets cannot reactivate it.
+        match self.active_sessions.get(&sender) {
+            Some(active_id) if active_id != &session_id => {
+                let old_session = active_id.clone();
+
+                self.retired_sessions
+                    .entry(sender)
+                    .or_default()
+                    .insert(old_session.clone());
+
+                self.active_sessions.insert(sender, session_id.clone());
+
+                println!(
+                    "Publisher session changed at {}: {} -> {}",
+                    sender, old_session, session_id
+                );
+            }
+            None => {
+                self.active_sessions.insert(sender, session_id.clone());
+            }
+            _ => {}
+        }
+
+        // Each publisher session has independent sequence state.
+        let stream_key = (sender, session_id);
+        let tracker = self.sequence_trackers.entry(stream_key).or_default();
 
         // Each publisher has an independent sequence-number stream.
         let sequence_event = tracker.observe(sequence_number);

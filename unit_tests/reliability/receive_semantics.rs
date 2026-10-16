@@ -4,6 +4,7 @@
 
 use super::*;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 #[test]
 fn heartbeat_marks_participant_alive() {
@@ -224,16 +225,13 @@ fn corrupt_payload_does_not_advance_sequence_tracker() {
         .unwrap();
 
     assert!(result.is_none());
-    assert_eq!(
-        subscriber
-            .sequence_trackers
-            .get(&sender)
-            .map(|tracker| tracker.last_sequence()),
-        None,
+    assert!(
+        subscriber.sequence_trackers.is_empty(),
         "a corrupt payload must not create or advance sequence state"
     );
 }
 
+#[test]
 #[test]
 fn sequence_one_after_high_water_mark_starts_a_new_stream() {
     let topic = Topic::new("test/publisher-restart", "TestPayload");
@@ -250,6 +248,7 @@ fn sequence_one_after_high_water_mark_starts_a_new_stream() {
         QosPolicy::new(10, crate::Reliability::BestEffort),
     )
     .unwrap();
+
     let sender: SocketAddr = "127.0.0.1:7401".parse().unwrap();
     let payload = crate::serialize_payload(&TestPayload { value: 1 }).unwrap();
 
@@ -260,6 +259,7 @@ fn sequence_one_after_high_water_mark_starts_a_new_stream() {
         type_name: topic.type_name().to_string(),
         payload: payload.clone(),
     };
+
     assert!(
         subscriber
             .handle_data_message(high, sender)
@@ -272,21 +272,75 @@ fn sequence_one_after_high_water_mark_starts_a_new_stream() {
         sequence_number: 1,
         topic: topic.name().to_string(),
         type_name: topic.type_name().to_string(),
-        payload,
+        payload: payload.clone(),
     };
+
     assert!(
         subscriber
             .handle_data_message(restarted, sender)
             .unwrap()
             .is_some(),
-        "sequence 1 after a higher sequence should be accepted as a restarted stream"
+        "the new publisher session should be accepted"
     );
+
     assert_eq!(
         subscriber
             .sequence_trackers
-            .get(&sender)
+            .get(&(sender, "test-session-b".to_string()))
             .unwrap()
             .last_sequence(),
         1
+    );
+
+    // A delayed packet from the retired session must be ignored.
+    let delayed_old_session = crate::WireMessage {
+        publisher_session_id: "test-session-a".to_string(),
+        sequence_number: 9,
+        topic: topic.name().to_string(),
+        type_name: topic.type_name().to_string(),
+        payload: payload.clone(),
+    };
+
+    assert!(
+        subscriber
+            .handle_data_message(delayed_old_session, sender)
+            .unwrap()
+            .is_none(),
+        "packets from a retired session must be ignored"
+    );
+
+    assert_eq!(
+        subscriber
+            .active_sessions
+            .get(&sender)
+            .map(String::as_str),
+        Some("test-session-b"),
+        "a delayed packet must not reactivate the retired session"
+    );
+
+    // The active session must continue delivering messages.
+    let next_message = crate::WireMessage {
+        publisher_session_id: "test-session-b".to_string(),
+        sequence_number: 2,
+        topic: topic.name().to_string(),
+        type_name: topic.type_name().to_string(),
+        payload,
+    };
+
+    assert!(
+        subscriber
+            .handle_data_message(next_message, sender)
+            .unwrap()
+            .is_some(),
+        "the active publisher session should continue delivering messages"
+    );
+
+    assert_eq!(
+        subscriber
+            .sequence_trackers
+            .get(&(sender, "test-session-b".to_string()))
+            .unwrap()
+            .last_sequence(),
+        2
     );
 }

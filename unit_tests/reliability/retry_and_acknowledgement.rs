@@ -599,6 +599,16 @@ fn retransmission_limit_is_independent_per_subscriber() {
         "exhausted subscriber should have no pending ACK entries"
     );
 
+    assert!(
+        publisher.delivery_failed(exhausted_address, 1),
+        "subscriber A should be marked failed after exhausting retries"
+    );
+
+    assert!(
+        !publisher.delivery_failed(active_address, 1),
+        "subscriber B should not be marked failed while retries remain"
+    );
+
     // Subscriber B's message should have been retransmitted.
     let mut buffer = [0u8; 65_535];
 
@@ -854,6 +864,16 @@ fn acknowledgement_clears_only_the_matching_subscribers_pending_state() {
             address_a,
         )
         .unwrap();
+
+    assert!(
+        !publisher.delivery_failed(address_a, 1),
+        "subscriber A should not be marked failed"
+    );
+
+    assert!(
+        !publisher.delivery_failed(address_b, 1),
+        "subscriber B should not be marked failed while its ACK is pending"
+    );
 
     // Only subscriber A's pending ACK should be removed.
     assert_eq!(publisher.pending_ack_count(), 1);

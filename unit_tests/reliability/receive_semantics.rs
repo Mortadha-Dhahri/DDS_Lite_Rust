@@ -71,12 +71,12 @@ fn duplicate_reliable_message_is_acknowledged_without_redelivery() {
     let payload = crate::serialize_payload(&TestPayload { value: 42 }).unwrap();
 
     let message = NetworkMessage::Data(crate::WireMessage {
+        publisher_session_id: "test-session-a".to_string(),
         sequence_number: 1,
         topic: topic.name().to_string(),
         type_name: topic.type_name().to_string(),
         payload,
     });
-
     let bytes = crate::encode_network_message(&message).unwrap();
 
     // First delivery: the subscriber should return the payload and ACK it.
@@ -153,6 +153,7 @@ fn messages_from_different_publishers_have_independent_sequences() {
         let payload = crate::serialize_payload(&TestPayload { value }).unwrap();
 
         let message = NetworkMessage::Data(crate::WireMessage {
+            publisher_session_id: "test-session-a".to_string(),
             sequence_number: 1,
             topic: topic.name().to_string(),
             type_name: topic.type_name().to_string(),
@@ -212,6 +213,7 @@ fn corrupt_payload_does_not_advance_sequence_tracker() {
     let result = subscriber
         .handle_data_message(
             crate::WireMessage {
+                publisher_session_id: "test-session-a".to_string(),
                 sequence_number: 7,
                 topic: topic.name().to_string(),
                 type_name: topic.type_name().to_string(),
@@ -252,6 +254,7 @@ fn sequence_one_after_high_water_mark_starts_a_new_stream() {
     let payload = crate::serialize_payload(&TestPayload { value: 1 }).unwrap();
 
     let high = crate::WireMessage {
+        publisher_session_id: "test-session-a".to_string(),
         sequence_number: 8,
         topic: topic.name().to_string(),
         type_name: topic.type_name().to_string(),
@@ -265,6 +268,7 @@ fn sequence_one_after_high_water_mark_starts_a_new_stream() {
     );
 
     let restarted = crate::WireMessage {
+        publisher_session_id: "test-session-b".to_string(),
         sequence_number: 1,
         topic: topic.name().to_string(),
         type_name: topic.type_name().to_string(),

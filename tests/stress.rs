@@ -301,6 +301,7 @@ fn burst_ignores_duplicate_packets() {
             sequence_number,
             topic: topic.name().to_string(),
             type_name: topic.type_name().to_string(),
+            publisher_session_id: "test-session-a".to_string(),
             payload: serialize_payload(&TestMessage {
                 value: sequence_number,
             })
@@ -421,6 +422,7 @@ fn burst_detects_sequence_gap_and_sends_nack() {
             sequence_number,
             topic: topic.name().to_string(),
             type_name: topic.type_name().to_string(),
+            publisher_session_id: "test-session-a".to_string(),
             payload: serialize_payload(&TestMessage {
                 value: sequence_number,
             })

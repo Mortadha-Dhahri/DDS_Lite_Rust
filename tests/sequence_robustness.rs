@@ -22,6 +22,7 @@ fn send_data(
     let message = dds_lite_rust::WireMessage {
         sequence_number,
         topic: topic.name().to_string(),
+        publisher_session_id: "test-session-a".to_string(),
         type_name: topic.type_name().to_string(),
         payload: dds_lite_rust::serialize_payload(&TestMessage { value })?,
     };

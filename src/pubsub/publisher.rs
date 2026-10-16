@@ -263,6 +263,13 @@ where
             .map(|pending| pending.len())
             .sum()
     }
+
+    pub fn delivery_failed(&self, subscriber: SocketAddr, sequence_number: u64) -> bool {
+        self.nack_attempts
+            .get(&subscriber)
+            .is_some_and(|sequences| sequences.contains_key(&sequence_number))
+    }
+
     pub fn expired_acknowledgements(&self, timeout: Duration) -> Vec<(SocketAddr, u64)> {
         let now = Instant::now();
 
@@ -422,6 +429,9 @@ where
     }
     pub fn reliability_tick(&mut self, timeout: Duration) -> io::Result<()> {
         self.process_reliability(timeout)
+    }
+    pub fn discovered_subscribers(&self) -> &[DiscoveredEndpoint] {
+        self.subscribers.as_deref().unwrap_or(&[])
     }
     pub fn refresh_subscribers(&mut self) -> io::Result<()> {
         let subscribers = self

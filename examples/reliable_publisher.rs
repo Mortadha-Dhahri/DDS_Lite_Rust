@@ -84,6 +84,11 @@ fn main() -> io::Result<()> {
         };
 
         publisher.publish(&state)?;
+        let subscribers: Vec<SocketAddr> = publisher
+            .discovered_subscribers()
+            .iter()
+            .map(|subscriber| subscriber.address)
+            .collect();
 
         println!(
             "Published sample {}: speed = {:.1} km/h",
@@ -100,10 +105,14 @@ fn main() -> io::Result<()> {
             thread::sleep(Duration::from_millis(10));
         }
 
-        if publisher.pending_ack_count() > 0 {
+        let failed = subscribers
+            .iter()
+            .any(|&subscriber| publisher.delivery_failed(subscriber, sequence as u64));
+
+        if publisher.pending_ack_count() > 0 || failed {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                format!("No ACK received for sample {sequence}"),
+                format!("Delivery not acknowledged by all subscribers for sample {sequence}"),
             ));
         }
 

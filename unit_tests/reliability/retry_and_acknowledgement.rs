@@ -512,6 +512,11 @@ fn retransmission_stops_after_maximum_attempts() {
         "exhausted pending ACK should be removed"
     );
 
+    assert!(
+        publisher.delivery_failed(receiver_address, 1),
+        "delivery should be marked failed after retries are exhausted"
+    );
+
     // Verify that no fourth retransmission was sent.
     let mut buffer = [0u8; 65_535];
 
@@ -1476,6 +1481,11 @@ fn acknowledgement_clears_retry_state_after_pending_ack_is_removed() {
             subscriber_address,
         )
         .unwrap();
+
+    assert!(
+        !publisher.delivery_failed(subscriber_address, 1),
+        "a late ACK should clear the failed-delivery state"
+    );
 
     assert!(
         !publisher.nack_attempts.contains_key(&subscriber_address),

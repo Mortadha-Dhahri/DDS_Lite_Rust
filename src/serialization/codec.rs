@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WireMessage {
+    pub publisher_session_id: String,
     pub sequence_number: u64,
     pub topic: String,
     pub type_name: String,

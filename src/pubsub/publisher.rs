@@ -3,6 +3,7 @@ use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 use crate::qos::sequence::MAX_TRACKED_GAP;
 
@@ -25,6 +26,7 @@ pub struct Publisher<T> {
     topic: Topic,
     discovery: NetworkDiscovery,
     transport: UdpTransport,
+    session_id: String,
     qos: QosPolicy,
     history: History<T>,
     next_sequence_number: u64,
@@ -50,6 +52,7 @@ where
             topic,
             discovery,
             transport,
+            session_id: Uuid::new_v4().to_string(),
             qos: qos.clone(),
             history: History::new(qos.history_depth()),
             next_sequence_number: 1,
@@ -89,12 +92,12 @@ where
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         let message = WireMessage {
+            publisher_session_id: self.session_id.clone(),
             sequence_number,
             topic: self.topic.name().to_string(),
             type_name: self.topic.type_name().to_string(),
             payload,
         };
-
         let network_message = NetworkMessage::Data(message);
 
         let bytes = encode_network_message(&network_message)
@@ -152,6 +155,7 @@ where
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
         let message = WireMessage {
+            publisher_session_id: self.session_id.clone(),
             sequence_number: entry.sequence_number(),
             topic: self.topic.name().to_string(),
             type_name: self.topic.type_name().to_string(),

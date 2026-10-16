@@ -21,6 +21,7 @@ fn send_sample(
     let payload = serialize_payload(&TestMessage { value }).unwrap();
 
     let message = NetworkMessage::Data(WireMessage {
+        publisher_session_id: "test-session-a".to_string(),
         sequence_number,
         topic: topic.name().to_string(),
         type_name: topic.type_name().to_string(),

@@ -4,6 +4,10 @@ This catalog covers the named tests under `unit_tests/` and `tests/`. Unit tests
 
 Run all tests with `cargo test --all-targets`. Integration tests use real local sockets and exercise multiple components; unit tests focus on individual state transitions.
 
+## Managed endpoint runtime integration tests
+
+`tests/endpoint_runtime.rs` covers nonblocking idle polls for publisher and subscriber endpoints, heartbeat scheduling and wire transmission, heartbeat progress while DATA traffic arrives, reliable DATA/ACK exchange, and end-to-end managed reliable delivery through the discovery server. The timer-error regression verifies that a failing heartbeat callback is reported before receive, leaving a queued DATA datagram available to the next poll.
+
 ## Unit tests
 
 ### `unit_tests/reliability/retry_and_acknowledgement.rs`

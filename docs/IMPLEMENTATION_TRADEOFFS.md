@@ -30,7 +30,3 @@ A future serialization review could compare postcard and bincode 2, but serializ
 - The participant runtime example binds to `127.0.0.1` and uses a loopback discovery server address. Multi-host operation requires configurable bind/advertised addresses and appropriate network configuration.
 - Publisher discovery lookup may happen synchronously inside `publish()` on initial publication and at the refresh interval. A separate discovery-refresh path or caller-triggered refresh can keep it off latency-sensitive publishing paths.
 - Reliable delivery has bounded history and bounded retries; it does not guarantee delivery through arbitrary loss, crashes, or partitions.
-
-## CI and validation
-
-The repository should run formatting, strict Clippy, and all-target tests on pushes and pull requests. Hosted CI status is not a substitute for a local run; if a hosted job is blocked by account billing or permissions, run the same commands locally and report the limitation clearly.

@@ -105,26 +105,14 @@ where
     /// Poll at most one datagram, then run due timer actions. Returns a sample
     /// only when the managed endpoint is a subscriber.
     pub fn poll_once(&mut self) -> io::Result<Option<T>> {
-        let mut first_error = self.run_due_timers().err();
+        // Run timers before receiving so a timer error cannot consume a sample
+        // that this API would then be unable to return alongside the error.
+        self.run_due_timers()?;
 
-        let result = match &mut self.endpoint {
+        match &mut self.endpoint {
             ManagedEndpoint::Publisher(publisher) => publisher.try_receive_control().map(|_| None),
             ManagedEndpoint::Subscriber(subscriber) => subscriber.try_receive(),
-        };
-
-        // Check the deadline again after polling. Even if traffic is continuous,
-        // every call remains bounded to one receive attempt and timer work runs.
-        if let Err(error) = self.run_due_timers()
-            && first_error.is_none()
-        {
-            first_error = Some(error);
         }
-
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-
-        result
     }
 
     fn run_due_timers(&mut self) -> io::Result<()> {

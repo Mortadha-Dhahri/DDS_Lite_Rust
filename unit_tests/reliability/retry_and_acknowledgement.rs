@@ -1709,3 +1709,72 @@ fn managed_publisher_poll_processes_acknowledgement() {
 
     assert_eq!(runtime.pending_ack_count(), 0);
 }
+
+
+#[test]
+fn managed_runtime_retransmits_when_reliability_deadline_is_due() {
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    receiver.set_nonblocking(true).unwrap();
+    let receiver_address = receiver.local_addr().unwrap();
+
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let topic = Topic::new("test/managed-retry", "TestMessage");
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    publisher.history.push(1, TestMessage { value: 42 });
+    publisher
+        .pending_acks
+        .entry(receiver_address)
+        .or_default()
+        .insert(
+            1,
+            PendingAck {
+                sent_at: Instant::now() - Duration::from_secs(1),
+                retransmission_attempts: 0,
+            },
+        );
+
+    let mut runtime = crate::EndpointRuntime::new(crate::ManagedEndpoint::Publisher(publisher))
+        .unwrap()
+        .with_reliability_timeout(Duration::from_millis(1))
+        .with_reliability_interval(Duration::from_millis(2));
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let mut received = None;
+    while Instant::now() < deadline {
+        runtime.poll_once().unwrap();
+
+        let mut buffer = [0u8; 65_535];
+        match receiver.recv_from(&mut buffer) {
+            Ok((size, _sender)) => {
+                received = Some(decode_network_message(&buffer[..size]).unwrap());
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::yield_now();
+            }
+            Err(error) => panic!("failed to receive managed retransmission: {error}"),
+        }
+    }
+
+    match received {
+        Some(NetworkMessage::Data(message)) => {
+            assert_eq!(message.sequence_number, 1);
+            assert_eq!(message.topic, topic.name());
+            let sample: TestMessage = deserialize_payload(&message.payload).unwrap();
+            assert_eq!(sample, TestMessage { value: 42 });
+        }
+        other => panic!("expected retransmitted DATA message, got {other:?}"),
+    }
+}

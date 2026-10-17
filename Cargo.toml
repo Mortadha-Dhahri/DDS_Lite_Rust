@@ -2,11 +2,16 @@
 name = "dds-lite-rust"
 version = "0.1.0"
 edition = "2024"
+description = "A learning-focused DDS-inspired publish/subscribe middleware implemented in Rust"
+license = "MIT"
+repository = "https://github.com/Mortadha-Dhahri/DDS_Lite_Rust"
+readme = "README.md"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
 uuid = { version = "1", features = ["v4"] }
+log = "0.4"
 
 [[bench]]
 name = "throughput"

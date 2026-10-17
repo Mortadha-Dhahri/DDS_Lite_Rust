@@ -1,3 +1,4 @@
+use log::{debug, warn};
 use crate::core::Participant;
 use crate::qos::liveliness::LivelinessTracker;
 use std::io;
@@ -114,7 +115,7 @@ impl DiscoveryServer {
                     let request = match bincode::deserialize::<DiscoveryRequest>(&buffer[..size]) {
                         Ok(request) => request,
                         Err(error) => {
-                            eprintln!(
+                            warn!(
                                 "Ignoring malformed discovery datagram from {}: {}",
                                 sender, error
                             );
@@ -122,11 +123,11 @@ impl DiscoveryServer {
                         }
                     };
 
-                    eprintln!("DISCOVERY REQUEST from {sender}: {request:?}");
+                    debug!("DISCOVERY REQUEST from {sender}: {request:?}");
 
                     let response = self.handle_request(request);
 
-                    eprintln!("DISCOVERY RESPONSE to {sender}: {response:?}");
+                    debug!("DISCOVERY RESPONSE to {sender}: {response:?}");
 
                     let bytes = bincode::serialize(&response)
                         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;

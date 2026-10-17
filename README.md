@@ -58,8 +58,6 @@ All three processes use loopback addresses and are intended for a single-machine
 ```bash
 cargo build --all-targets
 cargo test --all-targets
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
 ```
 
 For reliability-focused coverage:

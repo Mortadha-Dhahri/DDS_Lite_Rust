@@ -215,3 +215,63 @@ fn heartbeat_timer_advances_while_subscriber_receives_data() {
         "heartbeat deadlines should continue advancing while DATA arrives"
     );
 }
+
+
+#[test]
+fn managed_reliable_subscriber_delivers_data_and_sends_ack() {
+    use std::net::UdpSocket;
+
+    let topic = Topic::new("runtime/reliable-roundtrip", "Sample");
+    let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber_address = subscriber_transport.local_addr().unwrap();
+    let subscriber = Subscriber::<Sample>::new(
+        topic.clone(),
+        discovery(),
+        subscriber_transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+    let mut runtime = EndpointRuntime::new(ManagedEndpoint::Subscriber(subscriber)).unwrap();
+
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    sender
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let payload = dds_lite_rust::serialize_payload(&Sample { value: 123 }).unwrap();
+    let data = NetworkMessage::Data(dds_lite_rust::WireMessage {
+        publisher_session_id: "managed-reliable-session".to_string(),
+        sequence_number: 1,
+        topic: topic.name().to_string(),
+        type_name: topic.type_name().to_string(),
+        payload,
+    });
+    let bytes = dds_lite_rust::encode_network_message(&data).unwrap();
+    sender.send_to(&bytes, subscriber_address).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let received = loop {
+        if let Some(sample) = runtime.poll_once().unwrap() {
+            break Some(sample);
+        }
+        if Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(received, Some(Sample { value: 123 }));
+
+    let mut buffer = [0u8; 2048];
+    let (size, _source) = sender
+        .recv_from(&mut buffer)
+        .expect("reliable subscriber should send an ACK");
+    match dds_lite_rust::decode_network_message(&buffer[..size]).unwrap() {
+        NetworkMessage::Control(ControlMessage::Ack {
+            topic: ack_topic,
+            sequence_number,
+        }) => {
+            assert_eq!(ack_topic, topic.name());
+            assert_eq!(sequence_number, 1);
+        }
+        other => panic!("expected ACK control message, received {other:?}"),
+    }
+}

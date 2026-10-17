@@ -1153,7 +1153,7 @@ fn reliable_delivery_recovers_a_dropped_sample() {
         "publisher should receive an ACK for the duplicate sequence"
     );
 
-    assert_eq!(publisher_address.port() != 0, true);
+    assert!(publisher_address.port() != 0);
 }
 #[test]
 fn publishing_and_acknowledgement_clear_pending_state() {

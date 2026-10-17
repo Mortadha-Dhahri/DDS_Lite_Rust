@@ -192,16 +192,6 @@ where
         }
     }
 
-    /// Number of acknowledgements still pending for a managed publisher.
-    ///
-    /// Returns zero for a managed subscriber.
-    pub fn pending_ack_count(&self) -> usize {
-        match &self.endpoint {
-            ManagedEndpoint::Publisher(publisher) => publisher.pending_ack_count(),
-            ManagedEndpoint::Subscriber(_) => 0,
-        }
-    }
-
     /// Returns the endpoint's local UDP address.
     pub fn local_addr(&self) -> io::Result<std::net::SocketAddr> {
         match &self.endpoint {

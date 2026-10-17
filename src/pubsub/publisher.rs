@@ -8,10 +8,9 @@ use uuid::Uuid;
 use crate::qos::sequence::MAX_TRACKED_GAP;
 
 use crate::{
-    ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
-    NetworkMessage, Participant, QosPolicy, Reliability, Subscriber, Topic, Transport,
-    UdpTransport, WireMessage, decode_network_message, deserialize_payload, encode_network_message,
-    serialize_payload,
+    ControlMessage, DiscoveredEndpoint, EndpointKind, History, NetworkDiscovery, NetworkMessage,
+    QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage, decode_network_message,
+    encode_network_message, serialize_payload,
 };
 
 const MAX_RETRANSMISSIONS: u8 = 3;

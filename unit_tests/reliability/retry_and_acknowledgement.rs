@@ -1610,3 +1610,42 @@ fn send_failure_for_one_subscriber_does_not_block_other_subscribers() {
         other => panic!("expected data message, got {other:?}"),
     }
 }
+
+
+#[test]
+fn nonblocking_control_poll_reports_unexpected_data() {
+    let topic = Topic::new("test/publisher-poll", "TestMessage");
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+    publisher.set_nonblocking(true).unwrap();
+
+    let sender = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let destination = publisher.local_addr().unwrap();
+    send_sample(&sender, &topic, destination, 1, 99);
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        match publisher.try_receive_control() {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                assert!(
+                    error.to_string().contains("unexpected DATA"),
+                    "error should explain why the packet was rejected: {error}"
+                );
+                break;
+            }
+            Ok(false) if Instant::now() < deadline => std::thread::yield_now(),
+            result => panic!("expected explicit error for unexpected DATA, got {result:?}"),
+        }
+    }
+}

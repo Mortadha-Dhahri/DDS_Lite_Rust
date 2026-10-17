@@ -122,6 +122,7 @@ Start at the [documentation index](docs/README.md).
 - [Test catalog](docs/TEST_CATALOG.md)
 - [Testing guide](docs/TESTING.md)
 - [Reliability behavior and limitations](docs/RELIABILITY.md)
+- [Implementation trade-offs and follow-up work](docs/IMPLEMENTATION_TRADEOFFS.md)
 
 ## Repository layout
 

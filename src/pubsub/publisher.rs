@@ -261,6 +261,19 @@ where
         Ok(())
     }
 
+    /// Send a heartbeat control message to a known peer without discovery I/O.
+    pub fn send_heartbeat_to(
+        &self,
+        participant_id: u64,
+        destination: SocketAddr,
+    ) -> io::Result<()> {
+        let message = NetworkMessage::Control(ControlMessage::Heartbeat { participant_id });
+        let bytes = encode_network_message(&message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.transport.send(&bytes, destination)?;
+        Ok(())
+    }
+
     pub fn pending_ack_count(&self) -> usize {
         self.pending_acks
             .values()

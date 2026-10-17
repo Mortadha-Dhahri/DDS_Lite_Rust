@@ -5,7 +5,7 @@ pub mod qos;
 pub mod serialization;
 pub mod transport;
 
-pub use core::{Participant, ParticipantRuntime, Topic};
+pub use core::{EndpointRuntime, ManagedEndpoint, Participant, ParticipantRuntime, Topic};
 
 pub use discovery::{DiscoveredEndpoint, DiscoveryServer, EndpointKind, NetworkDiscovery};
 

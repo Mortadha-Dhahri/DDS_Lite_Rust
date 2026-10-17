@@ -3,6 +3,7 @@
 //! verify internal invariants without exposing private implementation details.
 
 use super::*;
+use crate::{deserialize_payload, DiscoveryServer, Participant, Subscriber};
 use std::net::UdpSocket;
 use std::time::Duration;
 
@@ -1152,7 +1153,7 @@ fn reliable_delivery_recovers_a_dropped_sample() {
         "publisher should receive an ACK for the duplicate sequence"
     );
 
-    assert_eq!(publisher_address.port() != 0, true);
+    assert!(publisher_address.port() != 0);
 }
 #[test]
 fn publishing_and_acknowledgement_clear_pending_state() {
@@ -1608,5 +1609,173 @@ fn send_failure_for_one_subscriber_does_not_block_other_subscribers() {
             assert_eq!(payload.value, 77);
         }
         other => panic!("expected data message, got {other:?}"),
+    }
+}
+
+
+#[test]
+fn nonblocking_control_poll_reports_unexpected_data() {
+    let topic = Topic::new("test/publisher-poll", "TestMessage");
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+    publisher.set_nonblocking(true).unwrap();
+
+    let sender = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let destination = publisher.local_addr().unwrap();
+    send_sample(&sender, &topic, destination, 1, 99);
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        match publisher.try_receive_control() {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                assert!(
+                    error.to_string().contains("unexpected DATA"),
+                    "error should explain why the packet was rejected: {error}"
+                );
+                break;
+            }
+            Ok(false) if Instant::now() < deadline => std::thread::yield_now(),
+            result => panic!("expected explicit error for unexpected DATA, got {result:?}"),
+        }
+    }
+}
+
+
+#[test]
+fn managed_publisher_poll_processes_acknowledgement() {
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let publisher_address = transport.local_addr().unwrap();
+    let topic = Topic::new("test/managed-ack", "TestMessage");
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    let subscriber = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let subscriber_address = subscriber.local_addr().unwrap();
+    publisher
+        .pending_acks
+        .entry(subscriber_address)
+        .or_default()
+        .insert(
+            7,
+            PendingAck {
+                sent_at: Instant::now(),
+                retransmission_attempts: 0,
+            },
+        );
+
+    let mut runtime = crate::EndpointRuntime::new(crate::ManagedEndpoint::Publisher(publisher))
+        .unwrap();
+    assert_eq!(runtime.pending_ack_count(), 1);
+
+    let ack = NetworkMessage::Control(ControlMessage::Ack {
+        topic: topic.name().to_string(),
+        sequence_number: 7,
+    });
+    let bytes = encode_network_message(&ack).unwrap();
+    subscriber.send_to(&bytes, publisher_address).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        runtime.poll_once().unwrap();
+        if runtime.pending_ack_count() == 0 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "managed publisher did not process the queued ACK"
+        );
+        std::thread::yield_now();
+    }
+
+    assert_eq!(runtime.pending_ack_count(), 0);
+}
+
+
+#[test]
+fn managed_runtime_retransmits_when_reliability_deadline_is_due() {
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    receiver.set_nonblocking(true).unwrap();
+    let receiver_address = receiver.local_addr().unwrap();
+
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let topic = Topic::new("test/managed-retry", "TestMessage");
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    publisher.history.push(1, TestMessage { value: 42 });
+    publisher
+        .pending_acks
+        .entry(receiver_address)
+        .or_default()
+        .insert(
+            1,
+            PendingAck {
+                sent_at: Instant::now() - Duration::from_secs(1),
+                retransmission_attempts: 0,
+            },
+        );
+
+    let mut runtime = crate::EndpointRuntime::new(crate::ManagedEndpoint::Publisher(publisher))
+        .unwrap()
+        .with_reliability_timeout(Duration::from_millis(1))
+        .with_reliability_interval(Duration::from_millis(2));
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let mut received = None;
+    while Instant::now() < deadline {
+        runtime.poll_once().unwrap();
+
+        let mut buffer = [0u8; 65_535];
+        match receiver.recv_from(&mut buffer) {
+            Ok((size, _sender)) => {
+                received = Some(decode_network_message(&buffer[..size]).unwrap());
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::yield_now();
+            }
+            Err(error) => panic!("failed to receive managed retransmission: {error}"),
+        }
+    }
+
+    match received {
+        Some(NetworkMessage::Data(message)) => {
+            assert_eq!(message.sequence_number, 1);
+            assert_eq!(message.topic, topic.name());
+            let sample: TestMessage = deserialize_payload(&message.payload).unwrap();
+            assert_eq!(sample, TestMessage { value: 42 });
+        }
+        other => panic!("expected retransmitted DATA message, got {other:?}"),
     }
 }

@@ -8,10 +8,9 @@ use uuid::Uuid;
 use crate::qos::sequence::MAX_TRACKED_GAP;
 
 use crate::{
-    ControlMessage, DiscoveredEndpoint, DiscoveryServer, EndpointKind, History, NetworkDiscovery,
-    NetworkMessage, Participant, QosPolicy, Reliability, Subscriber, Topic, Transport,
-    UdpTransport, WireMessage, decode_network_message, deserialize_payload, encode_network_message,
-    serialize_payload,
+    ControlMessage, DiscoveredEndpoint, EndpointKind, History, NetworkDiscovery, NetworkMessage,
+    QosPolicy, Reliability, Topic, Transport, UdpTransport, WireMessage, decode_network_message,
+    encode_network_message, serialize_payload,
 };
 
 const MAX_RETRANSMISSIONS: u8 = 3;
@@ -261,6 +260,19 @@ where
         Ok(())
     }
 
+    /// Send a heartbeat control message to a known peer without discovery I/O.
+    pub fn send_heartbeat_to(
+        &self,
+        participant_id: u64,
+        destination: SocketAddr,
+    ) -> io::Result<()> {
+        let message = NetworkMessage::Control(ControlMessage::Heartbeat { participant_id });
+        let bytes = encode_network_message(&message)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.transport.send(&bytes, destination)?;
+        Ok(())
+    }
+
     pub fn pending_ack_count(&self) -> usize {
         self.pending_acks
             .values()
@@ -425,7 +437,10 @@ where
                         self.handle_control_message(control, sender)?;
                         Ok(true)
                     }
-                    NetworkMessage::Data(_) => Ok(false),
+                    NetworkMessage::Data(_) => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "publisher received an unexpected DATA message while polling for CONTROL",
+                    )),
                 }
             }
             None => Ok(false),

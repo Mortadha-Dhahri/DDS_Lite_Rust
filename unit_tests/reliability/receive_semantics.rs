@@ -110,7 +110,7 @@ fn assert_ack_received(
 ) {
     let mut buffer = [0u8; 65_535];
 
-    let (size, sender) = publisher
+    let (size, _sender) = publisher
         .recv_from(&mut buffer)
         .expect("expected an ACK from the subscriber");
 

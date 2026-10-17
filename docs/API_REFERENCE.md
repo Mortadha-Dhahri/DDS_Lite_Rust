@@ -19,6 +19,19 @@ Typical flow: define a serializable payload and `Topic`; start a discovery serve
 ### `Message<T>`
 A local typed wrapper for a topic and value. `Message::new(topic, data)` stores both; it is distinct from the serialized network `WireMessage`.
 
+### Managed endpoint runtime — `EndpointRuntime<T>`
+
+`EndpointRuntime::new(ManagedEndpoint::Publisher(...))` or `EndpointRuntime::new(ManagedEndpoint::Subscriber(...))` switches the endpoint socket to nonblocking mode and creates a caller-driven polling runtime.
+
+- `poll_once()` runs due timer actions and then attempts at most one datagram receive; it never waits for a datagram.
+- `publish(value)` forwards to a managed publisher and returns `InvalidInput` for a managed subscriber.
+- `with_reliability_timeout(Duration)` configures the ACK timeout used by publisher reliability checks; `with_reliability_interval(Duration)` configures how often those checks are scheduled.
+- `with_heartbeat(interval, callback)` schedules a caller-supplied callback. It executes on the polling thread and must not block.
+- `with_heartbeat_peer(interval, participant_id, address)` sends heartbeats to one known peer using the endpoint socket. Discovery refresh must happen outside the polling loop.
+- `pending_ack_count()` and `local_addr()` expose endpoint state useful for monitoring and tests.
+
+The runtime does not spawn a background thread. The application must call `poll_once()` repeatedly and may stop by dropping the runtime. Timer/callback errors are returned from `poll_once()`; timer work runs before receive so a timer error does not consume an unread DATA datagram. This cooperative model bounds each poll to one receive attempt, but callback work and other synchronous operations invoked by the application must themselves remain non-blocking for the overall loop to stay responsive.
+
 ### `ParticipantRuntime`
 `ParticipantRuntime::new(participant_id, port, kind, topic, discovery_server) -> io::Result<Self>` binds a participant UDP transport, creates discovery, and registers participant and endpoint. `send_heartbeat()` sends a heartbeat control message to discovered peer endpoints for the topic. `with_heartbeat_interval(Duration)` configures the explicit heartbeat timer; `tick()` performs renewal/sending when due. `with_reliability_check_interval(Duration)` sets a reliability-check interval field. This runtime is caller-driven: `tick()` must be called; it is not an autonomous async executor.
 

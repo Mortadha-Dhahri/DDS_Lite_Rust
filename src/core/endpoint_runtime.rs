@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
@@ -28,6 +29,7 @@ pub struct EndpointRuntime<T> {
     heartbeat_interval: Option<Duration>,
     next_heartbeat: Option<Instant>,
     heartbeat_action: Option<Box<dyn FnMut() -> io::Result<()> + 'static>>,
+    heartbeat_peer: Option<(u64, SocketAddr)>,
 }
 
 impl<T> EndpointRuntime<T>
@@ -50,6 +52,7 @@ where
             heartbeat_interval: None,
             next_heartbeat: None,
             heartbeat_action: None,
+            heartbeat_peer: None,
         })
     }
 
@@ -79,6 +82,23 @@ where
         self.heartbeat_interval = Some(interval);
         self.next_heartbeat = Some(Instant::now() + interval);
         self.heartbeat_action = Some(Box::new(action));
+        self
+    }
+
+    /// Send heartbeat messages to one known peer on the endpoint's existing socket.
+    ///
+    /// This avoids discovery requests in the polling path. Callers are responsible
+    /// for refreshing the peer address outside the managed polling loop.
+    pub fn with_heartbeat_peer(
+        mut self,
+        interval: Duration,
+        participant_id: u64,
+        peer_address: SocketAddr,
+    ) -> Self {
+        self.heartbeat_interval = Some(interval);
+        self.next_heartbeat = Some(Instant::now() + interval);
+        self.heartbeat_action = None;
+        self.heartbeat_peer = Some((participant_id, peer_address));
         self
     }
 
@@ -121,13 +141,27 @@ where
         }
 
         if self.next_heartbeat.is_some_and(|deadline| now >= deadline) {
-            if let Some(action) = self.heartbeat_action.as_mut() {
-                if let Err(error) = action() {
-                    if first_error.is_none() {
-                        first_error = Some(error);
+            let heartbeat_result = if let Some((participant_id, peer_address)) = self.heartbeat_peer {
+                match &self.endpoint {
+                    ManagedEndpoint::Publisher(publisher) => {
+                        publisher.send_heartbeat_to(participant_id, peer_address)
+                    }
+                    ManagedEndpoint::Subscriber(subscriber) => {
+                        subscriber.send_heartbeat_to(participant_id, peer_address)
                     }
                 }
+            } else if let Some(action) = self.heartbeat_action.as_mut() {
+                action()
+            } else {
+                Ok(())
+            };
+
+            if let Err(error) = heartbeat_result {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
             }
+
             if let Some(interval) = self.heartbeat_interval {
                 self.next_heartbeat = Some(now + interval);
             }

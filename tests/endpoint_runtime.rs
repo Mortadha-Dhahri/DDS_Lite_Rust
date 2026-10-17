@@ -61,3 +61,42 @@ fn managed_publisher_poll_returns_when_idle() {
         "managed poll should not block when no datagram is available"
     );
 }
+
+
+#[test]
+fn managed_runtime_runs_heartbeat_action_when_due() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let topic = Topic::new("runtime/heartbeat", "Sample");
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber = Subscriber::<Sample>::new(
+        topic,
+        discovery(),
+        transport,
+        QosPolicy::new(10, Reliability::BestEffort),
+    )
+    .unwrap();
+
+    let heartbeat_count = Arc::new(AtomicUsize::new(0));
+    let observed_count = Arc::clone(&heartbeat_count);
+    let mut runtime = EndpointRuntime::new(ManagedEndpoint::Subscriber(subscriber))
+        .unwrap()
+        .with_heartbeat(Duration::from_millis(5), move || {
+            observed_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+    let deadline = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < deadline && heartbeat_count.load(Ordering::SeqCst) == 0 {
+        assert!(runtime.poll_once().unwrap().is_none());
+        std::thread::yield_now();
+    }
+
+    assert!(
+        heartbeat_count.load(Ordering::SeqCst) >= 1,
+        "heartbeat action should run once its deadline is due"
+    );
+}

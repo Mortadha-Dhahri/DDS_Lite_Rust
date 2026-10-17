@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use dds_lite_rust::{
     EndpointRuntime, ManagedEndpoint, NetworkDiscovery, Publisher, QosPolicy, Reliability,
     Subscriber, Topic, UdpTransport, ControlMessage, NetworkMessage, decode_network_message,
+    DiscoveryServer, Participant, EndpointKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -274,4 +275,85 @@ fn managed_reliable_subscriber_delivers_data_and_sends_ack() {
         }
         other => panic!("expected ACK control message, received {other:?}"),
     }
+}
+
+
+#[test]
+fn managed_reliable_publisher_and_subscriber_exchange_data_and_ack() {
+    let server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let server_address = server.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let _ = server.run();
+    });
+
+    let topic = Topic::new("runtime/end-to-end-reliable", "Sample");
+
+    let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber_address = subscriber_transport.local_addr().unwrap();
+    let subscriber_discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), server_address).unwrap();
+    let subscriber_participant = Participant::new(2002, subscriber_address);
+    subscriber_discovery
+        .register_participant(&subscriber_participant)
+        .unwrap();
+    subscriber_discovery
+        .register_endpoint(2002, topic.name(), EndpointKind::Subscriber)
+        .unwrap();
+    let subscriber = Subscriber::<Sample>::new(
+        topic.clone(),
+        subscriber_discovery,
+        subscriber_transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+    let mut subscriber_runtime =
+        EndpointRuntime::new(ManagedEndpoint::Subscriber(subscriber)).unwrap();
+
+    let publisher_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let publisher_address = publisher_transport.local_addr().unwrap();
+    let publisher_discovery =
+        NetworkDiscovery::bind("127.0.0.1:0".parse().unwrap(), server_address).unwrap();
+    let publisher_participant = Participant::new(1001, publisher_address);
+    publisher_discovery
+        .register_participant(&publisher_participant)
+        .unwrap();
+    publisher_discovery
+        .register_endpoint(1001, topic.name(), EndpointKind::Publisher)
+        .unwrap();
+    let publisher = Publisher::<Sample>::new(
+        topic,
+        publisher_discovery,
+        publisher_transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+    let mut publisher_runtime =
+        EndpointRuntime::new(ManagedEndpoint::Publisher(publisher)).unwrap();
+
+    publisher_runtime.publish(&Sample { value: 314 }).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let mut delivered = None;
+    while Instant::now() < deadline {
+        if let Some(sample) = subscriber_runtime.poll_once().unwrap() {
+            delivered = Some(sample);
+            break;
+        }
+        publisher_runtime.poll_once().unwrap();
+        std::thread::yield_now();
+    }
+
+    assert_eq!(delivered, Some(Sample { value: 314 }));
+
+    let ack_deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < ack_deadline && publisher_runtime.pending_ack_count() != 0 {
+        publisher_runtime.poll_once().unwrap();
+        subscriber_runtime.poll_once().unwrap();
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        publisher_runtime.pending_ack_count(),
+        0,
+        "publisher should process the subscriber's ACK"
+    );
 }

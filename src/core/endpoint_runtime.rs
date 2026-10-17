@@ -114,10 +114,10 @@ where
 
         // Check the deadline again after polling. Even if traffic is continuous,
         // every call remains bounded to one receive attempt and timer work runs.
-        if let Err(error) = self.run_due_timers() {
-            if first_error.is_none() {
-                first_error = Some(error);
-            }
+        if let Err(error) = self.run_due_timers()
+            && first_error.is_none()
+        {
+            first_error = Some(error);
         }
 
         if let Some(error) = first_error {
@@ -132,10 +132,10 @@ where
         let mut first_error = None;
 
         if now >= self.next_reliability_check {
-            if let ManagedEndpoint::Publisher(publisher) = &mut self.endpoint {
-                if let Err(error) = publisher.reliability_tick(self.reliability_timeout) {
-                    first_error = Some(error);
-                }
+            if let ManagedEndpoint::Publisher(publisher) = &mut self.endpoint
+                && let Err(error) = publisher.reliability_tick(self.reliability_timeout)
+            {
+                first_error = Some(error);
             }
             self.next_reliability_check = now + self.reliability_interval;
         }
@@ -156,10 +156,10 @@ where
                 Ok(())
             };
 
-            if let Err(error) = heartbeat_result {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
+            if let Err(error) = heartbeat_result
+                && first_error.is_none()
+            {
+                first_error = Some(error);
             }
 
             if let Some(interval) = self.heartbeat_interval {

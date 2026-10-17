@@ -15,7 +15,6 @@ pub struct ParticipantRuntime {
     kind: EndpointKind,
     last_heartbeat: Instant,
     heartbeat_interval: Duration,
-    last_reliability_check: Instant,
     reliability_check_interval: Duration,
 }
 
@@ -49,7 +48,6 @@ impl ParticipantRuntime {
             kind,
             last_heartbeat: Instant::now(),
             heartbeat_interval: Duration::from_secs(1),
-            last_reliability_check: Instant::now(),
             reliability_check_interval: Duration::from_millis(100),
         })
     }

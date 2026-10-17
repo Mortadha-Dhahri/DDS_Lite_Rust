@@ -173,6 +173,25 @@ where
         }
     }
 
+    /// Publish a sample when this runtime owns a publisher.
+    pub fn publish(&mut self, sample: &T) -> io::Result<()> {
+        match &mut self.endpoint {
+            ManagedEndpoint::Publisher(publisher) => publisher.publish(sample),
+            ManagedEndpoint::Subscriber(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot publish through a managed subscriber",
+            )),
+        }
+    }
+
+    /// Number of reliable deliveries still awaiting acknowledgement.
+    pub fn pending_ack_count(&self) -> usize {
+        match &self.endpoint {
+            ManagedEndpoint::Publisher(publisher) => publisher.pending_ack_count(),
+            ManagedEndpoint::Subscriber(_) => 0,
+        }
+    }
+
     /// Returns the endpoint's local UDP address.
     pub fn local_addr(&self) -> io::Result<std::net::SocketAddr> {
         match &self.endpoint {

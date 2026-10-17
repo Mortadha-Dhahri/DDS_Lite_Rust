@@ -357,3 +357,50 @@ fn managed_reliable_publisher_and_subscriber_exchange_data_and_ack() {
         "publisher should process the subscriber's ACK"
     );
 }
+
+#[test]
+fn timer_error_does_not_consume_waiting_sample() {
+    let topic = Topic::new("runtime/timer-error", "Sample");
+    let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber_address = subscriber_transport.local_addr().unwrap();
+    let subscriber = Subscriber::<Sample>::new(
+        topic.clone(),
+        discovery(),
+        subscriber_transport,
+        QosPolicy::new(10, Reliability::BestEffort),
+    )
+    .unwrap();
+
+    let mut fail_once = true;
+    let mut runtime = EndpointRuntime::new(ManagedEndpoint::Subscriber(subscriber))
+        .unwrap()
+        .with_heartbeat(Duration::ZERO, move || {
+            if fail_once {
+                fail_once = false;
+                Err(std::io::Error::other("injected heartbeat failure"))
+            } else {
+                Ok(())
+            }
+        });
+
+    let sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let payload = dds_lite_rust::serialize_payload(&Sample { value: 808 }).unwrap();
+    let message = NetworkMessage::Data(dds_lite_rust::WireMessage {
+        publisher_session_id: "timer-error-session".to_string(),
+        sequence_number: 1,
+        topic: topic.name().to_string(),
+        type_name: topic.type_name().to_string(),
+        payload,
+    });
+    let bytes = dds_lite_rust::encode_network_message(&message).unwrap();
+    sender.send_to(&bytes, subscriber_address).unwrap();
+
+    let error = runtime.poll_once().expect_err("first heartbeat should fail");
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
+
+    assert_eq!(
+        runtime.poll_once().unwrap(),
+        Some(Sample { value: 808 }),
+        "the DATA datagram must remain available after a timer error"
+    );
+}

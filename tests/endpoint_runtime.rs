@@ -151,3 +151,67 @@ fn managed_runtime_sends_heartbeat_to_known_peer() {
         "expected a heartbeat control message from participant {participant_id}"
     );
 }
+
+
+#[test]
+fn heartbeat_timer_advances_while_subscriber_receives_data() {
+    use std::net::UdpSocket;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let topic = Topic::new("runtime/data-under-load", "Sample");
+    let subscriber_transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let subscriber_addr = subscriber_transport.local_addr().unwrap();
+    let subscriber = Subscriber::<Sample>::new(
+        topic.clone(),
+        discovery(),
+        subscriber_transport,
+        QosPolicy::new(10, Reliability::BestEffort),
+    )
+    .unwrap();
+
+    let heartbeat_count = Arc::new(AtomicUsize::new(0));
+    let observed_count = Arc::clone(&heartbeat_count);
+    let mut runtime = EndpointRuntime::new(ManagedEndpoint::Subscriber(subscriber))
+        .unwrap()
+        .with_heartbeat(Duration::from_millis(2), move || {
+            observed_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    sender.set_nonblocking(true).unwrap();
+    let publisher_session_id = "runtime-test-session".to_string();
+    let payload = dds_lite_rust::serialize_payload(&Sample { value: 7 }).unwrap();
+    let wire_message = dds_lite_rust::WireMessage {
+        publisher_session_id,
+        sequence_number: 1,
+        topic: topic.name().to_string(),
+        type_name: topic.type_name().to_string(),
+        payload,
+    };
+    let bytes = dds_lite_rust::encode_network_message(&NetworkMessage::Data(wire_message)).unwrap();
+
+    let deadline = Instant::now() + Duration::from_millis(300);
+    let mut delivered = 0usize;
+    let mut next_send = Instant::now();
+    while Instant::now() < deadline {
+        if Instant::now() >= next_send {
+            sender.send_to(&bytes, subscriber_addr).unwrap();
+            next_send = Instant::now() + Duration::from_millis(1);
+        }
+
+        if runtime.poll_once().unwrap().is_some() {
+            delivered += 1;
+        }
+        std::thread::yield_now();
+    }
+
+    assert!(delivered > 0, "runtime should deliver DATA while traffic is arriving");
+    assert!(
+        heartbeat_count.load(Ordering::SeqCst) >= 2,
+        "heartbeat deadlines should continue advancing while DATA arrives"
+    );
+}

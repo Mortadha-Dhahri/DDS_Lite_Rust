@@ -106,6 +106,10 @@ There is no Tokio or `mio` runtime integration at present. An asynchronous or re
 - **Network addressing:** the participant example binds to loopback by default, so it is a single-host demo without code/configuration changes. It is not ready for multi-host deployment as-is.
 - **Security and conformance:** authentication, encryption, comprehensive QoS, protocol negotiation, and full DDS/RTPS interoperability are out of scope.
 
+## Demos
+
+Browse the [demo guide](demo/README.md) for runnable examples covering basic pub/sub, discovery, reliable delivery, missing ACKs, runtime behavior, robustness tests, and the throughput benchmark.
+
 ## Documentation
 
 Start at the [documentation index](docs/README.md).
@@ -135,6 +139,7 @@ src/
 unit_tests/       Behavior-focused unit tests
 tests/            Cross-component integration and stress tests
 examples/         Runnable demos
+demo/             Demo guide and run instructions
 benches/          Throughput benchmark
 docs/             Architecture, API, testing and reliability docs
 ```

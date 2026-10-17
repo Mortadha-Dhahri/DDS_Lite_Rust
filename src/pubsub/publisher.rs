@@ -425,7 +425,10 @@ where
                         self.handle_control_message(control, sender)?;
                         Ok(true)
                     }
-                    NetworkMessage::Data(_) => Ok(false),
+                    NetworkMessage::Data(_) => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "publisher received an unexpected DATA message while polling for CONTROL",
+                    )),
                 }
             }
             None => Ok(false),

@@ -1,3 +1,4 @@
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::io;
 use std::marker::PhantomData;
@@ -140,7 +141,7 @@ where
         let entry = match self.history.find(sequence_number) {
             Some(entry) => entry,
             None => {
-                println!(
+                debug!(
                     "Cannot retransmit sequence {}: \
                      sample is no longer in history.",
                     sequence_number
@@ -168,7 +169,7 @@ where
 
         self.transport.send(&bytes, destination)?;
 
-        println!(
+        debug!(
             "Retransmitted sequence {} to {}.",
             sequence_number, destination
         );
@@ -196,7 +197,7 @@ where
                     return Ok(());
                 }
 
-                println!(
+                debug!(
                     "Received ACK from {} for sequence {}.",
                     sender, sequence_number
                 );
@@ -219,7 +220,7 @@ where
             ControlMessage::Heartbeat { participant_id } => {
                 // A heartbeat is valid traffic on this UDP socket; it must not panic
                 // the publisher control loop.
-                println!(
+                debug!(
                     "Received heartbeat from participant {} at {}.",
                     participant_id, sender
                 );
@@ -249,7 +250,7 @@ where
             }
 
             NetworkMessage::Data(_) => {
-                println!(
+                warn!(
                     "Publisher received an unexpected data message \
                     from {}.",
                     sender
@@ -328,7 +329,7 @@ where
             // The sample may have been evicted from publisher history.
             // Remove its pending ACK instead of retrying indefinitely.
             if self.history.find(sequence_number).is_none() {
-                println!(
+                warn!(
                     "Dropping pending ACK for sequence {} to {}: sample is no longer in history.",
                     sequence_number, subscriber
                 );
@@ -369,7 +370,7 @@ where
             return Ok(());
         }
 
-        println!(
+        debug!(
             "Received NACK from {} for sequences: {:?}",
             sender, missing_sequences
         );

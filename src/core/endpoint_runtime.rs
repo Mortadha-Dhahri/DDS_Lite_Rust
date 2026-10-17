@@ -25,6 +25,9 @@ pub struct EndpointRuntime<T> {
     reliability_timeout: Duration,
     reliability_interval: Duration,
     next_reliability_check: Instant,
+    heartbeat_interval: Option<Duration>,
+    next_heartbeat: Option<Instant>,
+    heartbeat_action: Option<Box<dyn FnMut() -> io::Result<()> + 'static>>,
 }
 
 impl<T> EndpointRuntime<T>
@@ -44,6 +47,9 @@ where
             reliability_timeout: Duration::from_millis(250),
             reliability_interval,
             next_reliability_check: Instant::now() + reliability_interval,
+            heartbeat_interval: None,
+            next_heartbeat: None,
+            heartbeat_action: None,
         })
     }
 
@@ -60,10 +66,26 @@ where
         self
     }
 
-    /// Poll at most one datagram, then run any reliability work whose deadline
-    /// is due. Returns a sample only when the managed endpoint is a subscriber.
+    /// Schedule a heartbeat action independently from receive polling.
+    ///
+    /// The action must be non-blocking: it runs on the polling thread. In
+    /// particular, do not perform synchronous discovery requests in this
+    /// callback. The callback can send heartbeats using an already-known peer
+    /// list or enqueue work for a separate worker.
+    pub fn with_heartbeat<F>(mut self, interval: Duration, action: F) -> Self
+    where
+        F: FnMut() -> io::Result<()> + 'static,
+    {
+        self.heartbeat_interval = Some(interval);
+        self.next_heartbeat = Some(Instant::now() + interval);
+        self.heartbeat_action = Some(Box::new(action));
+        self
+    }
+
+    /// Poll at most one datagram, then run due timer actions. Returns a sample
+    /// only when the managed endpoint is a subscriber.
     pub fn poll_once(&mut self) -> io::Result<Option<T>> {
-        let mut first_error = self.run_reliability_if_due().err();
+        let mut first_error = self.run_due_timers().err();
 
         let result = match &mut self.endpoint {
             ManagedEndpoint::Publisher(publisher) => publisher.try_receive_control().map(|_| None),
@@ -72,7 +94,7 @@ where
 
         // Check the deadline again after polling. Even if traffic is continuous,
         // every call remains bounded to one receive attempt and timer work runs.
-        if let Err(error) = self.run_reliability_if_due() {
+        if let Err(error) = self.run_due_timers() {
             if first_error.is_none() {
                 first_error = Some(error);
             }
@@ -85,17 +107,36 @@ where
         result
     }
 
-    fn run_reliability_if_due(&mut self) -> io::Result<()> {
-        if Instant::now() < self.next_reliability_check {
-            return Ok(());
+    fn run_due_timers(&mut self) -> io::Result<()> {
+        let now = Instant::now();
+        let mut first_error = None;
+
+        if now >= self.next_reliability_check {
+            if let ManagedEndpoint::Publisher(publisher) = &mut self.endpoint {
+                if let Err(error) = publisher.reliability_tick(self.reliability_timeout) {
+                    first_error = Some(error);
+                }
+            }
+            self.next_reliability_check = now + self.reliability_interval;
         }
 
-        if let ManagedEndpoint::Publisher(publisher) = &mut self.endpoint {
-            publisher.reliability_tick(self.reliability_timeout)?;
+        if self.next_heartbeat.is_some_and(|deadline| now >= deadline) {
+            if let Some(action) = self.heartbeat_action.as_mut() {
+                if let Err(error) = action() {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+            if let Some(interval) = self.heartbeat_interval {
+                self.next_heartbeat = Some(now + interval);
+            }
         }
 
-        self.next_reliability_check = Instant::now() + self.reliability_interval;
-        Ok(())
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Returns the endpoint's local UDP address.

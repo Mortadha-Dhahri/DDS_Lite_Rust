@@ -280,7 +280,7 @@ fn managed_reliable_subscriber_delivers_data_and_sends_ack() {
 
 #[test]
 fn managed_reliable_publisher_and_subscriber_exchange_data_and_ack() {
-    let server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let mut server = DiscoveryServer::bind("127.0.0.1:0".parse().unwrap()).unwrap();
     let server_address = server.local_addr().unwrap();
     std::thread::spawn(move || {
         let _ = server.run();

@@ -3,6 +3,7 @@
 //! verify internal invariants without exposing private implementation details.
 
 use super::*;
+use crate::{deserialize_payload, DiscoveryServer, Participant, Subscriber};
 use std::net::UdpSocket;
 use std::time::Duration;
 

@@ -1,3 +1,4 @@
+use log::{debug, warn};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
@@ -53,7 +54,7 @@ where
             let network_message = match Self::decode_message(&bytes) {
                 Ok(message) => message,
                 Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-                    println!("Ignoring malformed packet from {}: {}", sender, error);
+                    warn!("Ignoring malformed packet from {}: {}", sender, error);
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -89,7 +90,7 @@ where
 
         self.transport.send(&bytes, *destination)?;
 
-        println!("Sent NACK to {}.", destination);
+        debug!("Sent NACK to {}.", destination);
 
         Ok(())
     }
@@ -115,7 +116,7 @@ where
             ControlMessage::Heartbeat { participant_id } => {
                 self.liveliness.observe(participant_id);
 
-                println!("Received heartbeat from participant {}.", participant_id);
+                debug!("Received heartbeat from participant {}.", participant_id);
             }
 
             ControlMessage::Ack { .. } | ControlMessage::Nack { .. } => {}
@@ -145,7 +146,7 @@ where
         sender: SocketAddr,
     ) -> io::Result<Option<T>> {
         if message.topic != self.topic.name() {
-            println!(
+            debug!(
                 "Ignoring message for topic '{}' from {}",
                 message.topic, sender
             );
@@ -153,7 +154,7 @@ where
         }
 
         if message.type_name != self.topic.type_name() {
-            println!(
+            debug!(
                 "Ignoring message with unsupported type '{}' for topic '{}' from {}",
                 message.type_name, message.topic, sender
             );
@@ -165,7 +166,7 @@ where
         let data = match deserialize_payload::<T>(&message.payload) {
             Ok(data) => data,
             Err(error) => {
-                println!("Ignoring corrupt payload from {}: {}", sender, error);
+                warn!("Ignoring corrupt payload from {}: {}", sender, error);
                 return Ok(None);
             }
         };
@@ -179,7 +180,7 @@ where
             .get(&sender)
             .is_some_and(|sessions| sessions.contains(&session_id))
         {
-            println!(
+            debug!(
                 "Ignoring packet from retired publisher session {} at {}",
                 session_id, sender
             );
@@ -199,7 +200,7 @@ where
 
                 self.active_sessions.insert(sender, session_id.clone());
 
-                println!(
+                debug!(
                     "Publisher session changed at {}: {} -> {}",
                     sender, old_session, session_id
                 );
@@ -224,7 +225,7 @@ where
             }
             SequenceEvent::Late => {}
             SequenceEvent::Duplicate => {
-                println!("Ignoring duplicate sequence: {}", sequence_number);
+                debug!("Ignoring duplicate sequence: {}", sequence_number);
 
                 if self.qos.reliability() == crate::Reliability::Reliable {
                     self.send_ack(&sender, sequence_number)?;
@@ -246,7 +247,7 @@ where
                 let network_message = match Self::decode_message(&bytes) {
                     Ok(message) => message,
                     Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-                        println!("Ignoring malformed packet from {}: {}", sender, error);
+                        warn!("Ignoring malformed packet from {}: {}", sender, error);
                         return Ok(None);
                     }
                     Err(error) => return Err(error),

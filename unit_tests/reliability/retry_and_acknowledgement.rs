@@ -1649,3 +1649,63 @@ fn nonblocking_control_poll_reports_unexpected_data() {
         }
     }
 }
+
+
+#[test]
+fn managed_publisher_poll_processes_acknowledgement() {
+    let discovery = NetworkDiscovery::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:6000".parse().unwrap(),
+    )
+    .unwrap();
+    let transport = UdpTransport::bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let publisher_address = transport.local_addr().unwrap();
+    let topic = Topic::new("test/managed-ack", "TestMessage");
+    let mut publisher = Publisher::<TestMessage>::new(
+        topic.clone(),
+        discovery,
+        transport,
+        QosPolicy::new(10, Reliability::Reliable),
+    )
+    .unwrap();
+
+    let subscriber = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let subscriber_address = subscriber.local_addr().unwrap();
+    publisher
+        .pending_acks
+        .entry(subscriber_address)
+        .or_default()
+        .insert(
+            7,
+            PendingAck {
+                sent_at: Instant::now(),
+                retransmission_attempts: 0,
+            },
+        );
+
+    let mut runtime = crate::EndpointRuntime::new(crate::ManagedEndpoint::Publisher(publisher))
+        .unwrap();
+    assert_eq!(runtime.pending_ack_count(), 1);
+
+    let ack = NetworkMessage::Control(ControlMessage::Ack {
+        topic: topic.name().to_string(),
+        sequence_number: 7,
+    });
+    let bytes = encode_network_message(&ack).unwrap();
+    subscriber.send_to(&bytes, publisher_address).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        runtime.poll_once().unwrap();
+        if runtime.pending_ack_count() == 0 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "managed publisher did not process the queued ACK"
+        );
+        std::thread::yield_now();
+    }
+
+    assert_eq!(runtime.pending_ack_count(), 0);
+}
